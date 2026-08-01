@@ -106,7 +106,17 @@ export interface Application {
   createdAt: string;
   updatedAt: string;
 }
+export type OpportunityType = "JOB" | "EXTERNAL_JOB";
 
+export interface CalendarOpportunity {
+  id: string;
+  type: OpportunityType;
+  title: string;
+  subtitle: string | null;
+  deadline: string;
+  status: string | null;
+  url: string | null;
+}
 export interface AdminDashboardData {
   totalStudents: number;
   totalRecruiters: number;
