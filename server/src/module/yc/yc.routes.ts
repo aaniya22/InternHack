@@ -5,6 +5,7 @@ import type { Request, Response } from "express";
 import * as cheerio from "cheerio";
 import { ycListQuerySchema, ycSlugSchema } from "./yc.validation.js";
 import { createLogger } from "../../utils/logger.js";
+import { cacheMiddleware } from "../../middleware/cache.middleware.js";
 
 const logger = createLogger("YCRoutes");
 
@@ -22,6 +23,10 @@ interface Founder {
 }
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Per-slug scrape lock: prevents concurrent requests for the same company
+// from triggering duplicate scrapes (TOCTOU race).
+const pendingScrapes = new Map<string, Promise<void>>();
 
 async function scrapeYCPage(slug: string) {
   const url = `https://www.ycombinator.com/companies/${slug}`;
@@ -159,7 +164,7 @@ function needsScrape(company: { scrapedAt: Date | null }): boolean {
 // ── Routes ──────────────────────────────────────────────────
 
 // GET /api/yc/stats - aggregate counts for filter dropdowns
-router.get("/stats", async (_req: Request, res: Response) => {
+router.get("/stats", cacheMiddleware(3600, "yc:stats"), async (_req: Request, res: Response) => {
   try {
     const [total, batchRows, industryRows, statusRows] = await Promise.all([
       prisma.ycCompany.count(),
@@ -199,7 +204,7 @@ router.get("/stats", async (_req: Request, res: Response) => {
 });
 
 // GET /api/yc/companies - paginated list with filters
-router.get("/companies", async (req: Request, res: Response) => {
+router.get("/companies", cacheMiddleware(3600, "yc:list"), async (req: Request, res: Response) => {
   try {
     const parsed = ycListQuerySchema.safeParse(req.query);
     if (!parsed.success) { res.status(400).json({ message: "Invalid query parameters" }); return; }
@@ -248,7 +253,8 @@ router.get("/companies", async (req: Request, res: Response) => {
 });
 
 // GET /api/yc/companies/:slug - single company detail (with on-demand scraping)
-router.get("/companies/:slug", async (req: Request, res: Response) => {
+// 30-min TTL: first request may scrape live, subsequent requests serve cached fresh data
+router.get("/companies/:slug", cacheMiddleware(1800, "yc:detail"), async (req: Request, res: Response) => {
   try {
     const slugParsed = ycSlugSchema.safeParse(req.params);
     if (!slugParsed.success) { res.status(400).json({ error: "Invalid slug" }); return; }
@@ -260,13 +266,22 @@ router.get("/companies/:slug", async (req: Request, res: Response) => {
       return;
     }
 
-    // If not scraped yet or stale, scrape in background and update
+    // If not scraped yet or stale, scrape on demand
     if (needsScrape(company)) {
-      // Don't block the response - fire and forget, but also try to return fresh data
-      try {
+      // Per-slug lock: if a scrape for this slug is already in flight,
+      // await it and return the freshly-updated company data.
+      const inFlight = pendingScrapes.get(company.slug);
+      if (inFlight) {
+        await inFlight;
+        const fresh = await prisma.ycCompany.findFirst({ where: { slug: company.slug } });
+        res.json(fresh ?? company);
+        return;
+      }
+
+      const scrapePromise = (async () => {
         const scraped = await scrapeYCPage(company.slug);
         if (scraped) {
-          const updated = await prisma.ycCompany.update({
+          await prisma.ycCompany.update({
             where: { id: company.id },
             data: {
               founders: scraped.founders.length > 0 ? (scraped.founders as unknown as Prisma.InputJsonValue) : undefined,
@@ -275,19 +290,30 @@ router.get("/companies/:slug", async (req: Request, res: Response) => {
               scrapedAt: new Date(),
             },
           });
-          res.json(updated);
-          return;
-        }
-      } catch (scrapeErr) {
-        logger.error(`Scrape failed for ${company.slug}`, scrapeErr);
-        // Mark as scraped to avoid retrying immediately
-        await prisma.ycCompany
-          .update({
+        } else {
+          await prisma.ycCompany.update({
             where: { id: company.id },
             data: { scrapedAt: new Date() },
-          })
-          .catch(() => {});
+          });
+        }
+      })();
+
+      pendingScrapes.set(company.slug, scrapePromise);
+
+      try {
+        await scrapePromise;
+        const fresh = await prisma.ycCompany.findFirst({ where: { slug: company.slug } });
+        res.json(fresh ?? company);
+      } catch (scrapeErr) {
+        logger.error(`Scrape failed for ${company.slug}`, scrapeErr);
+        await prisma.ycCompany
+          .update({ where: { id: company.id }, data: { scrapedAt: new Date() } })
+          .catch((err) => console.error("Failed to update scrapedAt:", err));
+        res.json(company);
+      } finally {
+        pendingScrapes.delete(company.slug);
       }
+      return;
     }
 
     res.json(company);

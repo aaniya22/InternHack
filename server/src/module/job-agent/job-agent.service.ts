@@ -1,12 +1,15 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../database/db.js";
 import { jobIndexService } from "../job-index/job-index.service.js";
 import { sendEmail } from "../../utils/email.utils.js";
+import { buildUnsubscribeUrl } from "../../utils/unsubscribe.utils.js";
 import { jobAgentJobsEmailHtml, jobAgentJobsEmailText } from "../../utils/email-templates.js";
 
 const genAI = new GoogleGenerativeAI(process.env["GEMINI_API_KEY"]!);
 const JOB_EMAIL_COOLDOWN_SECONDS = 60;
 const JOB_EMAIL_DAILY_LIMIT = 5;
+const MAX_CONVERSATION_MESSAGES = 50;
 
 export class JobAgentEmailError extends Error {
   constructor(
@@ -34,7 +37,6 @@ CURRENT USER PROFILE:
 - Graduating: ${user?.graduationYear || "Not set"}
 - Skills: ${user?.skills?.join(", ") || "None listed"}
 - Location: ${user?.location || "Not set"}
-- Job Status: ${user?.jobStatus || "Not set"}
 - Bio: ${user?.bio || "Not set"}
 
 CURRENT PREFERENCES:
@@ -172,6 +174,14 @@ async function upsertPreferences(userId: number, updatedPreferences: any): Promi
   return true;
 }
 
+async function persistCappedConversation(convId: number, history: any[], context: any) {
+  const cappedHistory = history.slice(-MAX_CONVERSATION_MESSAGES);
+  await prisma.jobAgentConversation.update({
+    where: { id: convId },
+    data: { messages: cappedHistory, context },
+  });
+}
+
 function truncateContext(context?: string | null): string | null {
   const trimmed = context?.replace(/\s+/g, " ").trim();
   if (!trimmed) return null;
@@ -232,7 +242,7 @@ export class JobAgentService {
       where: { id: userId },
       select: {
         name: true, skills: true, college: true,
-        graduationYear: true, bio: true, location: true, jobStatus: true,
+        graduationYear: true, bio: true, location: true,
       },
     });
     const pref = await prisma.userJobPreference.findUnique({ where: { userId } });
@@ -271,10 +281,7 @@ export class JobAgentService {
       jobIds: jobs.map((j: any) => j.id),
     });
 
-    await prisma.jobAgentConversation.update({
-      where: { id: conv.id },
-      data: { messages: history, context: parsed.updatedPreferences || conv.context },
-    });
+    await persistCappedConversation(conv.id, history, parsed.updatedPreferences || conv.context);
 
     return { reply: parsed.reply, jobs, preferencesUpdated };
   }
@@ -302,7 +309,7 @@ export class JobAgentService {
       where: { id: userId },
       select: {
         name: true, skills: true, college: true,
-        graduationYear: true, bio: true, location: true, jobStatus: true,
+        graduationYear: true, bio: true, location: true,
       },
     });
     const pref = await prisma.userJobPreference.findUnique({ where: { userId } });
@@ -386,10 +393,7 @@ export class JobAgentService {
       jobIds: jobs.map((j: any) => j.id),
     });
 
-    await prisma.jobAgentConversation.update({
-      where: { id: conv.id },
-      data: { messages: history, context: parsed.updatedPreferences || conv.context },
-    });
+    await persistCappedConversation(conv.id, history, parsed.updatedPreferences || conv.context);
   }
 
   async getConversation(userId: number) {
@@ -399,7 +403,8 @@ export class JobAgentService {
     });
     if (!conv) return null;
 
-    const messages = conv.messages as any[];
+    let messages = conv.messages as any[];
+    if (messages.length > MAX_CONVERSATION_MESSAGES) messages = messages.slice(-MAX_CONVERSATION_MESSAGES);
     const allJobIds: number[] = [];
     for (const m of messages) {
       if (m.jobIds?.length) allJobIds.push(...m.jobIds);
@@ -437,41 +442,13 @@ export class JobAgentService {
     const now = new Date();
     const context = truncateContext(input.context);
 
-    const [user, lastEmail, sentToday] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { name: true, email: true },
-      }),
-      prisma.jobAgentEmailLog.findFirst({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        select: { createdAt: true },
-      }),
-      prisma.jobAgentEmailLog.count({
-        where: { userId, createdAt: { gte: startOfToday() } },
-      }),
-    ]);
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true, email: true },
+    });
 
     if (!user) {
       throw new JobAgentEmailError(401, "User not found");
-    }
-
-    if (lastEmail) {
-      const secondsSinceLastSend = Math.floor((now.getTime() - lastEmail.createdAt.getTime()) / 1000);
-      if (secondsSinceLastSend < JOB_EMAIL_COOLDOWN_SECONDS) {
-        throw new JobAgentEmailError(
-          429,
-          "Email sent recently. Please wait before trying again.",
-          JOB_EMAIL_COOLDOWN_SECONDS - secondsSinceLastSend,
-        );
-      }
-    }
-
-    if (sentToday >= JOB_EMAIL_DAILY_LIMIT) {
-      const tomorrow = startOfToday();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const retryAfter = Math.max(1, Math.ceil((tomorrow.getTime() - now.getTime()) / 1000));
-      throw new JobAgentEmailError(429, "Daily email limit reached. Try again tomorrow.", retryAfter);
     }
 
     const uniqueJobIds = [...new Set(input.jobIds)];
@@ -532,6 +509,65 @@ export class JobAgentService {
       settingsUrl,
     };
 
+    const reserveEmailLog = async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          return await prisma.$transaction(
+            async (tx) => {
+              const [lastEmail, sentToday] = await Promise.all([
+                tx.jobAgentEmailLog.findFirst({
+                  where: { userId },
+                  orderBy: { createdAt: "desc" },
+                  select: { createdAt: true },
+                }),
+                tx.jobAgentEmailLog.count({
+                  where: { userId, createdAt: { gte: startOfToday() } },
+                }),
+              ]);
+
+              if (lastEmail) {
+                const secondsSinceLastSend = Math.floor((now.getTime() - lastEmail.createdAt.getTime()) / 1000);
+                if (secondsSinceLastSend < JOB_EMAIL_COOLDOWN_SECONDS) {
+                  throw new JobAgentEmailError(
+                    429,
+                    "Email sent recently. Please wait before trying again.",
+                    JOB_EMAIL_COOLDOWN_SECONDS - secondsSinceLastSend,
+                  );
+                }
+              }
+
+              if (sentToday >= JOB_EMAIL_DAILY_LIMIT) {
+                const tomorrow = startOfToday();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const retryAfter = Math.max(1, Math.ceil((tomorrow.getTime() - now.getTime()) / 1000));
+                throw new JobAgentEmailError(429, "Daily email limit reached. Try again tomorrow.", retryAfter);
+              }
+
+              return tx.jobAgentEmailLog.create({
+                data: {
+                  userId,
+                  jobIds: orderedJobs.map((job) => job.id),
+                  context,
+                  sentCount: count,
+                },
+              });
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+          );
+        } catch (err) {
+          const code = typeof err === "object" && err !== null && "code" in err ? (err as { code: unknown }).code : undefined;
+          if (code === "P2034" && attempt === 0) continue;
+          if (code === "P2034") {
+            throw new JobAgentEmailError(429, "Email sent recently. Please wait before trying again.", JOB_EMAIL_COOLDOWN_SECONDS);
+          }
+          throw err;
+        }
+      }
+
+      throw new JobAgentEmailError(429, "Email sent recently. Please wait before trying again.", JOB_EMAIL_COOLDOWN_SECONDS);
+    };
+
+    const logRow = await reserveEmailLog();
     let emailSent = false;
     try {
       emailSent = await sendEmail({
@@ -539,24 +575,22 @@ export class JobAgentService {
         subject,
         html: jobAgentJobsEmailHtml(emailArgs),
         text: jobAgentJobsEmailText(emailArgs),
+        unsubscribeUrl: buildUnsubscribeUrl(userId),
       });
     } catch (err) {
+      await prisma.jobAgentEmailLog.delete({ where: { id: logRow.id } }).catch((deleteErr) => {
+        console.error("[JobAgent] Failed to remove reserved email log:", deleteErr);
+      });
       console.error("[JobAgent] Failed to send jobs email:", err);
       throw new JobAgentEmailError(503, "Email service is temporarily unavailable");
     }
 
     if (!emailSent) {
+      await prisma.jobAgentEmailLog.delete({ where: { id: logRow.id } }).catch((deleteErr) => {
+        console.error("[JobAgent] Failed to remove reserved email log:", deleteErr);
+      });
       throw new JobAgentEmailError(503, "Email service is not configured");
     }
-
-    await prisma.jobAgentEmailLog.create({
-      data: {
-        userId,
-        jobIds: orderedJobs.map((job) => job.id),
-        context,
-        sentCount: count,
-      },
-    });
 
     return { sent: true, count };
   }

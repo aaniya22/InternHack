@@ -1,70 +1,77 @@
 import { prisma } from "../../database/db.js";
-import type { Prisma, UserRole, JobStatus } from "@prisma/client";
+import { invalidateVersionCache } from "../../middleware/auth.middleware.js";
+import { cacheGet, cacheSet } from "../../utils/cache.js";
+import { Prisma } from "@prisma/client";
+import type { UserRole } from "@prisma/client";
+
+type PlatformDashboardData = {
+  totalStudents: number;
+  totalJobs: number;
+  activeJobs: number;
+  totalApplications: number;
+  recentUsers: { id: number; name: string; email: string; role: UserRole; isActive: boolean; createdAt: Date }[];
+  recentJobs: {
+    id: number;
+    company: string | null;
+    role: string | null;
+    isActive: boolean;
+    expiresAt: Date;
+    createdAt: Date;
+    _count: { applications: number };
+  }[];
+};
+
+const DASHBOARD_CACHE_KEY = "admin:platform-dashboard";
 
 export class AdminPlatformService {
-  async getPlatformDashboard() {
-    const [
+  async getPlatformDashboard(): Promise<PlatformDashboardData> {
+    const cached = await cacheGet<PlatformDashboardData>(DASHBOARD_CACHE_KEY);
+    if (cached) return cached;
+
+    const now = new Date();
+    const [totalStudents, totalJobs, activeJobs, totalApplications, recentUsers, recentJobs] =
+      await Promise.all([
+        prisma.user.count({ where: { role: "STUDENT" } }),
+        prisma.adminJob.count(),
+        prisma.adminJob.count({ where: { isActive: true, expiresAt: { gt: now } } }),
+        prisma.externalJobApplication.count(),
+        prisma.user.findMany({
+          take: 10,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            isActive: true,
+            createdAt: true,
+          },
+        }),
+        prisma.adminJob.findMany({
+          take: 10,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            company: true,
+            role: true,
+            isActive: true,
+            expiresAt: true,
+            createdAt: true,
+            _count: { select: { applications: true } },
+          },
+        }),
+      ]);
+
+    const data: PlatformDashboardData = {
       totalStudents,
-      totalRecruiters,
       totalJobs,
       activeJobs,
       totalApplications,
-      applicationsByStatus,
-      recentUsers,
-      recentJobs,
-    ] = await Promise.all([
-      prisma.user.count({ where: { role: "STUDENT" } }),
-      prisma.user.count({ where: { role: "RECRUITER" } }),
-      prisma.job.count(),
-      prisma.job.count({ where: { status: "PUBLISHED" } }),
-      prisma.application.count(),
-      prisma.application.groupBy({
-        by: ["status"],
-        _count: { id: true },
-      }),
-      prisma.user.findMany({
-        take: 10,
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-          isActive: true,
-          createdAt: true,
-        },
-      }),
-      prisma.job.findMany({
-        take: 10,
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          title: true,
-          company: true,
-          status: true,
-          createdAt: true,
-          recruiter: { select: { id: true, name: true } },
-          _count: { select: { applications: true } },
-        },
-      }),
-    ]);
-
-    const statusBreakdown: Record<string, number> = {};
-    for (const s of applicationsByStatus) {
-      statusBreakdown[s.status] = s._count.id;
-    }
-
-    return {
-      totalStudents,
-      totalRecruiters,
-      totalJobs,
-      activeJobs,
-      totalApplications,
-      hiredCount: statusBreakdown["HIRED"] || 0,
-      statusBreakdown,
       recentUsers,
       recentJobs,
     };
+    await cacheSet(DASHBOARD_CACHE_KEY, data, 60);
+    return data;
   }
 
   async getUsers(query: {
@@ -109,7 +116,6 @@ export class AdminPlatformService {
           designation: true,
           contactNo: true,
           createdAt: true,
-          _count: { select: { applications: true, postedJobs: true } },
         },
       }),
       prisma.user.count({ where }),
@@ -135,7 +141,6 @@ export class AdminPlatformService {
         email: true,
         role: true,
         isActive: true,
-        isProfilePublic: true,
         isVerified: true,
         contactNo: true,
         profilePic: true,
@@ -154,24 +159,18 @@ export class AdminPlatformService {
         graduationYear: true,
         skills: true,
         location: true,
-        jobStatus: true,
         linkedinUrl: true,
         githubUrl: true,
         portfolioUrl: true,
         leetcodeUrl: true,
         projects: true,
-        achievements: true,
         createdAt: true,
         updatedAt: true,
         _count: {
           select: {
-            applications: true,
-            postedJobs: true,
-            atsScores: true,
             companyReviews: true,
             contributions: true,
             usageLogs: true,
-            studentBadges: true,
             skillTestAttempts: true,
             verifiedSkills: true,
           },
@@ -190,131 +189,55 @@ export class AdminPlatformService {
     adminId: number,
     reason?: string,
   ) {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new Error("User not found");
     if (userId === adminId) throw new Error("Cannot modify your own status");
 
-    const updated = await prisma.user.update({
-      where: { id: userId },
-      data: { isActive },
-      select: { id: true, name: true, email: true, role: true, isActive: true },
-    });
-
-    return updated;
+    try {
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: { isActive, tokenVersion: { increment: 1 } },
+        select: { id: true, name: true, email: true, role: true, isActive: true },
+      });
+      invalidateVersionCache(userId);
+      return user;
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+        throw new Error("User not found");
+      }
+      throw err;
+    }
   }
 
   async deleteUser(userId: number, adminId: number) {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new Error("User not found");
     if (userId === adminId) throw new Error("Cannot delete yourself");
 
+    // Fetch user + their adminProfile in one round-trip
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { adminProfile: true },
+    });
+    if (!user) throw new Error("User not found");
+
     if (user.role === "ADMIN") {
-      const adminProfile = await prisma.adminProfile.findUnique({
-        where: { userId: adminId },
-      });
-      if (!adminProfile || adminProfile.tier !== "SUPER_ADMIN")
+      // Batch: fetch deleter's profile alongside a SUPER_ADMIN count when needed
+      const [deleterProfile, superAdminCount] = await Promise.all([
+        prisma.adminProfile.findUnique({ where: { userId: adminId } }),
+        user.adminProfile?.tier === "SUPER_ADMIN"
+          ? prisma.adminProfile.count({ where: { tier: "SUPER_ADMIN", isActive: true } })
+          : Promise.resolve(null),
+      ]);
+
+      if (!deleterProfile || deleterProfile.tier !== "SUPER_ADMIN")
         throw new Error("Only SUPER_ADMIN can delete admin users");
 
-      // Prevent deleting the last SUPER_ADMIN
-      const targetProfile = await prisma.adminProfile.findUnique({
-        where: { userId },
-      });
-      if (targetProfile?.tier === "SUPER_ADMIN") {
-        const superAdminCount = await prisma.adminProfile.count({
-          where: { tier: "SUPER_ADMIN", isActive: true },
-        });
-        if (superAdminCount <= 1)
-          throw new Error("Cannot delete the last SUPER_ADMIN");
-      }
+      if (superAdminCount !== null && superAdminCount <= 1)
+        throw new Error("Cannot delete the last SUPER_ADMIN");
     }
 
+    // Invalidate all active sessions before deleting the user
+    await prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } });
+    invalidateVersionCache(userId);
     await prisma.user.delete({ where: { id: userId } });
-  }
-
-  async getAdminJobs(query: {
-    page: number;
-    limit: number;
-    search?: string | undefined;
-    status?: string | undefined;
-    recruiterId?: number | undefined;
-    sortBy: string;
-    sortOrder: string;
-  }) {
-    const where: Prisma.jobWhereInput = {};
-
-    if (query.status) {
-      where.status = query.status as JobStatus;
-    }
-
-    if (query.recruiterId) {
-      where.recruiterId = query.recruiterId;
-    }
-
-    if (query.search) {
-      where.OR = [
-        { title: { contains: query.search, mode: "insensitive" } },
-        { company: { contains: query.search, mode: "insensitive" } },
-      ];
-    }
-
-    const skip = (query.page - 1) * query.limit;
-    const orderBy: Prisma.jobOrderByWithRelationInput = {
-      [query.sortBy]: query.sortOrder,
-    };
-
-    const [jobs, total] = await Promise.all([
-      prisma.job.findMany({
-        where,
-        skip,
-        take: query.limit,
-        orderBy,
-        select: {
-          id: true,
-          title: true,
-          company: true,
-          location: true,
-          status: true,
-          createdAt: true,
-          recruiter: { select: { id: true, name: true, email: true } },
-          _count: { select: { applications: true, rounds: true } },
-        },
-      }),
-      prisma.job.count({ where }),
-    ]);
-
-    return {
-      jobs,
-      pagination: {
-        page: query.page,
-        limit: query.limit,
-        total,
-        totalPages: Math.ceil(total / query.limit),
-      },
-    };
-  }
-
-  async updateJobStatus(
-    jobId: number,
-    status: JobStatus,
-    adminId: number,
-    reason?: string,
-  ) {
-    const job = await prisma.job.findUnique({ where: { id: jobId } });
-    if (!job) throw new Error("Job not found");
-
-    const updated = await prisma.job.update({
-      where: { id: jobId },
-      data: { status },
-    });
-
-    return updated;
-  }
-
-  async deleteJob(jobId: number, adminId: number) {
-    const job = await prisma.job.findUnique({ where: { id: jobId } });
-    if (!job) throw new Error("Job not found");
-
-    await prisma.job.delete({ where: { id: jobId } });
+    invalidateVersionCache(userId);
   }
 
   async getErrorLogs(query: {
@@ -352,5 +275,14 @@ export class AdminPlatformService {
         totalPages: Math.ceil(total / query.limit),
       },
     };
+  }
+
+  async getSidebarStats() {
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [pendingContributions, recentErrors] = await Promise.all([
+      prisma.companyContribution.count({ where: { status: "PENDING" } }),
+      prisma.errorLog.count({ where: { statusCode: { gte: 500 }, createdAt: { gte: since24h } } }),
+    ]);
+    return { pendingContributions, recentErrors };
   }
 }

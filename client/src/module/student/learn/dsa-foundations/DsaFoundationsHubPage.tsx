@@ -1,7 +1,9 @@
 import { Link } from "react-router";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, BookOpen, CheckCircle2, Code2 } from "lucide-react";
 import { SEO } from "../../../../components/SEO";
+import { CompletionCelebration } from "../../../../components/CompletionCelebration";
 import { canonicalUrl } from "../../../../lib/seo.utils";
 import { LEVELS } from "./curriculum";
 import { getLevelStats, useProgressMap } from "./progress";
@@ -16,6 +18,16 @@ export default function DsaFoundationsHubPage() {
     0,
   );
   const overallPct = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
+
+  const [showCelebration, setShowCelebration] = useState(false);
+
+  useEffect(() => {
+    if (overallPct === 100 && !localStorage.getItem("dsa-foundations:celebrated")) {
+      localStorage.setItem("dsa-foundations:celebrated", "true");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowCelebration(true);
+    }
+  }, [overallPct]);
 
   return (
     <div className="bg-stone-50 dark:bg-stone-950 min-h-[calc(100vh-4rem)]">
@@ -56,21 +68,25 @@ export default function DsaFoundationsHubPage() {
             algorithm run, try it yourself, and quiz the key takeaway.
           </p>
 
-          <div className="mt-6">
-            <Link
-              to="/learn/dsa"
-              className="group inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-stone-900 dark:bg-stone-50 text-stone-50 dark:text-stone-900 text-xs font-mono uppercase tracking-widest border border-stone-900 dark:border-stone-50 hover:bg-lime-400 hover:text-stone-900 hover:border-lime-400 dark:hover:bg-lime-400 dark:hover:text-stone-900 transition-colors no-underline"
-            >
-              <Code2 className="w-4 h-4" />
-              open practice tracker
-              <span className="text-stone-400 dark:text-stone-500 group-hover:text-stone-700 transition-colors">·</span>
-              <span className="tabular-nums">3,300+ problems</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-            </Link>
-            <p className="mt-2 text-[10px] font-mono uppercase tracking-widest text-stone-500">
-              / pair the lessons with company-wise problem sets, bookmarks, and your solve history
-            </p>
-          </div>
+          <Link
+            to="/learn/dsa"
+            className="group mt-8 flex items-center justify-between gap-6 rounded-md bg-stone-900 dark:bg-stone-50 px-6 py-6 sm:px-8 sm:py-7 border border-stone-900 dark:border-stone-50 hover:bg-lime-400 hover:border-lime-400 dark:hover:bg-lime-400 dark:hover:border-lime-400 transition-colors no-underline"
+          >
+            <div className="flex items-center gap-4 min-w-0">
+              <span className="hidden sm:flex shrink-0 items-center justify-center w-12 h-12 rounded-md bg-white/10 dark:bg-stone-900/10 group-hover:bg-stone-900/10 transition-colors">
+                <Code2 className="w-6 h-6 text-stone-50 dark:text-stone-900 group-hover:text-stone-900 transition-colors" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-lg sm:text-2xl font-bold tracking-tight text-stone-50 dark:text-stone-900 group-hover:text-stone-900 transition-colors">
+                  Open practice tracker
+                </div>
+                <p className="mt-1 text-xs sm:text-sm text-stone-400 dark:text-stone-600 group-hover:text-stone-800 transition-colors">
+                  3,300+ problems, company-wise sets, bookmarks, and your solve history
+                </p>
+              </div>
+            </div>
+            <ArrowRight className="w-6 h-6 shrink-0 text-stone-50 dark:text-stone-900 group-hover:text-stone-900 group-hover:translate-x-1 transition-all" />
+          </Link>
         </motion.div>
 
         {/* Stats strip */}
@@ -201,6 +217,16 @@ export default function DsaFoundationsHubPage() {
           </p>
         </div>
       </div>
+
+      <CompletionCelebration
+        open={showCelebration}
+        onClose={() => setShowCelebration(false)}
+        trackName="DSA Foundations"
+        lessonCount={totalLessons}
+        estimatedHours={18}
+        badgeLabel="DSA Foundations — Animated"
+        userName="there"
+      />
     </div>
   );
 }

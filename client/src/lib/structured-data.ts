@@ -2,21 +2,49 @@ import { SITE_URL } from "./seo.utils";
 
 type JsonLd = Record<string, unknown>;
 
+function parseSalaryValue(salary: string): number | null {
+  const match = salary.replace(/,/g, "").match(/\d+/);
+  return match ? parseInt(match[0], 10) : null;
+}
+
+/**
+ * A job posting, in the shape Google Jobs consumes.
+ *
+ * `url` must be passed by the caller. It used to be hard-coded to
+ * `/jobs/<id>`, a route that does not exist, so every posting advertised a
+ * dead URL as its canonical location.
+ *
+ * Only use this on postings InternHack itself hosts. Google's job posting
+ * policy expects the marked-up page to be the authoritative listing, so
+ * third-party scraped listings whose real source is another site should not
+ * carry it.
+ */
 export function jobPostingSchema(job: {
   title: string;
   description: string;
   company: string;
   location: string;
+  url: string;
   salary?: string;
   deadline?: string | null;
   createdAt?: string;
   id: number;
+  isRemote?: boolean;
+  employmentType?: string;
 }): JsonLd {
+  const parsedSalary = job.salary ? parseSalaryValue(job.salary) : null;
+  const remote = job.isRemote ?? /remote|anywhere|work from home/i.test(job.location);
   return {
     "@context": "https://schema.org",
     "@type": "JobPosting",
     title: job.title,
     description: job.description,
+    // Google uses identifier to de-duplicate a posting across recrawls.
+    identifier: {
+      "@type": "PropertyValue",
+      name: "InternHack",
+      value: String(job.id),
+    },
     hiringOrganization: {
       "@type": "Organization",
       name: job.company,
@@ -26,12 +54,30 @@ export function jobPostingSchema(job: {
       address: {
         "@type": "PostalAddress",
         addressLocality: job.location,
+        addressCountry: "IN",
       },
     },
-    ...(job.salary && { baseSalary: job.salary }),
+    ...(parsedSalary && {
+      baseSalary: {
+        "@type": "MonetaryAmount",
+        currency: "INR",
+        value: {
+          "@type": "QuantitativeValue",
+          value: parsedSalary,
+          unitText: "MONTH",
+        },
+      },
+    }),
+    employmentType: job.employmentType || "INTERN",
+    // Required by Google whenever jobLocationType is TELECOMMUTE.
+    ...(remote && {
+      jobLocationType: "TELECOMMUTE",
+      applicantLocationRequirements: { "@type": "Country", name: "India" },
+    }),
     ...(job.deadline && { validThrough: job.deadline }),
     datePosted: job.createdAt || new Date().toISOString(),
-    url: `${SITE_URL}/jobs/${job.id}`,
+    directApply: false,
+    url: job.url,
   };
 }
 
@@ -46,6 +92,7 @@ export function blogPostingSchema(post: {
   featuredImage?: string | null;
   tags?: string[];
 }): JsonLd {
+  const postUrl = `${SITE_URL}/blog/${post.slug}`;
   return {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
@@ -56,11 +103,18 @@ export function blogPostingSchema(post: {
       "@type": "Organization",
       name: "InternHack",
       url: SITE_URL,
+      logo: {
+        "@type": "ImageObject",
+        url: `${SITE_URL}/og-image.png`,
+        width: 1200,
+        height: 630,
+      },
     },
-    ...(post.publishedAt && { datePublished: post.publishedAt }),
+    datePublished: post.publishedAt || new Date().toISOString(),
     ...(post.updatedAt && { dateModified: post.updatedAt }),
     ...(post.featuredImage && { image: post.featuredImage }),
-    url: `${SITE_URL}/blog/${post.slug}`,
+    url: postUrl,
+    mainEntityOfPage: { "@type": "WebPage", "@id": postUrl },
     ...(post.tags?.length && { keywords: post.tags.join(", ") }),
   };
 }
@@ -119,9 +173,26 @@ export function courseSchema(course: {
     },
     url: course.url,
     isAccessibleForFree: true,
+    numberOfCredits: "0",
+    educationalLevel: "Beginner to Advanced",
+    inLanguage: "en",
+    hasCourseInstance: [
+      {
+        "@type": "CourseInstance",
+        courseMode: "Online",
+        instructor: {
+          "@type": "Organization",
+          name: "InternHack",
+          url: SITE_URL,
+        },
+        courseSchedule: {
+          "@type": "Schedule",
+          repeatFrequency: "P1D",
+        },
+      },
+    ],
   };
 }
-
 export function breadcrumbSchema(
   items: { name: string; url: string }[],
 ): JsonLd {
@@ -151,6 +222,75 @@ export function faqSchema(
   };
 }
 
+/**
+ * A single interview question and its answer.
+ *
+ * FAQPage is the wrong type here: Google restricts FAQ rich results to pages
+ * whose FAQs are supplementary, and it does not apply to a page whose whole
+ * purpose is one question. QAPage is the type for that, and it is also the
+ * shape AI answer engines lift citations from.
+ *
+ * `answer` is truncated by the caller if needed. Keep the real prose, not a
+ * meta-description, since the answer text is what gets cited.
+ */
+export function qaPageSchema(q: {
+  title: string;
+  question: string;
+  answer: string;
+  url: string;
+  concepts?: string[];
+}): JsonLd {
+  return {
+    "@context": "https://schema.org",
+    "@type": "QAPage",
+    mainEntity: {
+      "@type": "Question",
+      name: q.title,
+      text: q.question,
+      answerCount: 1,
+      ...(q.concepts?.length && { keywords: q.concepts.join(", ") }),
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: q.answer,
+        url: q.url,
+      },
+    },
+  };
+}
+
+/**
+ * A tutorial or lesson page. TechArticle over Article: it carries
+ * proficiencyLevel and signals developer documentation, which is what these are.
+ */
+export function techArticleSchema(article: {
+  title: string;
+  description: string;
+  url: string;
+  section?: string;
+  difficulty?: string;
+  concepts?: string[];
+}): JsonLd {
+  return {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    headline: article.title,
+    description: article.description,
+    url: article.url,
+    ...(article.section && { articleSection: article.section }),
+    proficiencyLevel: article.difficulty || "Beginner",
+    inLanguage: "en",
+    isAccessibleForFree: true,
+    ...(article.concepts?.length && { keywords: article.concepts.join(", ") }),
+    author: { "@type": "Organization", name: "InternHack", url: SITE_URL },
+    publisher: {
+      "@type": "Organization",
+      name: "InternHack",
+      url: SITE_URL,
+      logo: { "@type": "ImageObject", url: `${SITE_URL}/og-image.png` },
+    },
+  };
+}
+
 export function websiteSchema(): JsonLd {
   return {
     "@context": "https://schema.org",
@@ -158,7 +298,7 @@ export function websiteSchema(): JsonLd {
     name: "InternHack",
     url: SITE_URL,
     description:
-      "AI-powered career platform for students, curated internships, ATS resume scoring, learning tracks, and direct recruiter connections.",
+      "AI-powered career platform for students, curated internships, ATS resume scoring, learning tracks, and placement preparation.",
     potentialAction: {
       "@type": "SearchAction",
       target: {
@@ -174,15 +314,21 @@ export function platformOrganizationSchema(): JsonLd {
   return {
     "@context": "https://schema.org",
     "@type": "Organization",
+    "@id": `${SITE_URL}/#organization`,
     name: "InternHack",
     url: SITE_URL,
-    logo: `${SITE_URL}/og-image.png`,
+    logo: {
+      "@type": "ImageObject",
+      url: `${SITE_URL}/og-image.png`,
+      width: 1200,
+      height: 630,
+    },
     description:
-      "AI-powered career platform for students and recruiters, internships, ATS resume scoring, learning tracks, open source, skill verification.",
+      "AI-powered career platform for students, internships, ATS resume scoring, learning tracks, open source, skill verification.",
     sameAs: [
       "https://twitter.com/internhack",
       "https://www.linkedin.com/company/internhack",
-      "https://github.com/internhack",
+      "https://github.com/SachinChaurasiya360/InternHack",
     ],
   };
 }

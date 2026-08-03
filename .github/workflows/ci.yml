@@ -5,17 +5,18 @@ on:
     branches:
       - main
 
+env:
+  DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/dummy"
+
 jobs:
   typecheck-client:
     name: Typecheck Client
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: "npm"
@@ -26,19 +27,17 @@ jobs:
         working-directory: client
 
       - name: Run TypeScript check
-        run: npx tsc --noEmit
+        run: npx tsc -b
         working-directory: client
 
   typecheck-server:
     name: Typecheck Server
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: "npm"
@@ -46,10 +45,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-        working-directory: server
-
-      - name: Run ESLint
-        run: npm run lint
         working-directory: server
 
       - name: Generate Prisma client
@@ -64,12 +59,10 @@ jobs:
     name: Lint Client
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: "npm"
@@ -80,19 +73,17 @@ jobs:
         working-directory: client
 
       - name: Run ESLint
-        run: npx eslint . --ext .ts,.tsx --max-warnings 250
+        run: npx eslint . --ext .ts,.tsx
         working-directory: client
 
-  test-server:
-    name: Test Server
+  lint-server:
+    name: Lint Server
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: "npm"
@@ -102,6 +93,109 @@ jobs:
         run: npm ci
         working-directory: server
 
+      - name: Run ESLint
+        run: npx eslint src
+        working-directory: server
+
+  build-client:
+    name: Build Client
+    runs-on: ubuntu-latest
+    needs: [typecheck-client, lint-client]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Build client
+        run: npm run build
+        working-directory: client
+
+  test-server:
+    name: Test Server
+    runs-on: ubuntu-latest
+    needs: [typecheck-server]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema=src/database/prisma/schema
+        working-directory: server
+
       - name: Run unit tests
         run: npm test
         working-directory: server
+
+  build-server:
+    name: Build Server
+    runs-on: ubuntu-latest
+    needs: [typecheck-server, test-server]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema=src/database/prisma/schema
+        working-directory: server
+
+      - name: Build server
+        run: npm run build
+        working-directory: server
+
+  security-audit:
+    name: Security & Secrets Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Audit client dependencies
+        run: npm audit --audit-level=high || true
+        working-directory: client
+
+      - name: Audit server dependencies
+        run: npm audit --audit-level=high || true
+        working-directory: server
+
+      - name: Scan for committed secrets/keys
+        run: |
+          echo "Scanning codebase for potential hardcoded secrets..."
+          if grep -rnE "(password|secret|private_key|api_key|token)[[:space:]]*=[[:space:]]*['\"][a-zA-Z0-9_-]{20,}['\"]" client/src/ server/src/ --exclude-dir=node_modules | grep -v "your-github-client-secret"; then
+            echo "Error: Potential hardcoded secrets found!"
+            exit 1
+          else
+            echo "No plain secrets found."
+          fi

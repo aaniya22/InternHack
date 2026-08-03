@@ -70,7 +70,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "discover",
     items: [
-      { to: "/student/grants", icon: Award, label: "Grants" },
       { to: "/student/opensource", icon: Globe, label: "Open Source" },
     ],
   },
@@ -205,8 +204,8 @@ export function useStudentSidebar() {
           >
             {avatar("md")}
             {!collapsed && (
-              <>
-                <h2 className="text-sm font-bold text-stone-900 dark:text-stone-50 truncate leading-tight flex-1">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-bold text-stone-900 dark:text-stone-50 truncate leading-tight">
                   {user?.name}
                 </h2>
                 {isPremium && (
@@ -215,7 +214,7 @@ export function useStudentSidebar() {
                     title="Premium"
                   />
                 )}
-              </>
+              </div>
             )}
           </Link>
           {!collapsed && (

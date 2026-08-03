@@ -1,15 +1,17 @@
 import { useCallback } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { python } from "@codemirror/lang-python";
-import { cpp } from "@codemirror/lang-cpp";
-import { java } from "@codemirror/lang-java";
+import { javascript } from "@codemirror/lang-javascript";
 import { keymap } from "@codemirror/view";
 import { Play, Loader2 } from "lucide-react";
 import type { DsaLanguage } from "../../../../lib/types";
 import { Button } from "../../../../components/ui/button";
 
-const LANG_EXTENSIONS = { python: python(), cpp: cpp(), java: java() };
-const LANG_LABELS: Record<DsaLanguage, string> = { python: "Python 3", cpp: "C++ 17", java: "Java" };
+const LANG_EXTENSIONS = { python: python(), javascript: javascript() };
+const LANG_LABELS: Record<DsaLanguage, string> = {
+  python: "Python 3",
+  javascript: "JavaScript (Node 18)",
+};
 
 interface Props {
   value: string;
@@ -22,11 +24,23 @@ interface Props {
   runsLimit?: number;
 }
 
-export function DsaCodeEditor({ value, onChange, onRun, language, onLanguageChange, isRunning, runsUsed, runsLimit }: Props) {
+export function DsaCodeEditor({
+  value,
+  onChange,
+  onRun,
+  language,
+  onLanguageChange,
+  isRunning,
+  runsUsed,
+  runsLimit,
+}: Props) {
   const runKeymap = keymap.of([
     {
       key: "Mod-Enter",
-      run: () => { onRun(); return true; },
+      run: () => {
+        onRun();
+        return true;
+      },
     },
   ]);
 
@@ -42,7 +56,9 @@ export function DsaCodeEditor({ value, onChange, onRun, language, onLanguageChan
           className="text-sm font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-900 dark:text-white"
         >
           {(Object.keys(LANG_LABELS) as DsaLanguage[]).map((lang) => (
-            <option key={lang} value={lang}>{LANG_LABELS[lang]}</option>
+            <option key={lang} value={lang}>
+              {LANG_LABELS[lang]}
+            </option>
           ))}
         </select>
 
@@ -60,9 +76,13 @@ export function DsaCodeEditor({ value, onChange, onRun, language, onLanguageChan
             className="bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             {isRunning ? (
-              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Running...</>
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Running...
+              </>
             ) : (
-              <><Play className="w-3.5 h-3.5" /> Run</>
+              <>
+                <Play className="w-3.5 h-3.5" /> Run
+              </>
             )}
           </Button>
         </div>

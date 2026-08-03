@@ -3,6 +3,7 @@ import { BadgeCheck, Plus, Pencil, Trash2, ChevronDown, ChevronRight, Save, X, L
 import { LoadingScreen } from "../../../components/LoadingScreen";
 import api from "../../../lib/axios";
 import { SEO } from "../../../components/SEO";
+import toast from "../../../components/ui/toast";
 
 interface SkillTestQuestion {
   question: string;
@@ -54,6 +55,7 @@ export default function AdminSkillTestsPage() {
       .catch(() => setLoading(false));
   }, [search]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { fetchTests(); }, [fetchTests]);
 
   const handleEdit = async (id: number) => {
@@ -62,7 +64,7 @@ export default function AdminSkillTestsPage() {
       setEditing(data.test);
       setCreating(false);
       setExpandedQ(null);
-    } catch { alert("Failed to load test"); }
+    } catch { toast.error("Failed to load test"); }
   };
 
   const handleCreate = () => {
@@ -77,14 +79,14 @@ export default function AdminSkillTestsPage() {
       await api.delete(`/admin/skill-tests/${id}`);
       setTests((prev) => prev.filter((t) => t.id !== id));
       if (editing?.id === id) { setEditing(null); setCreating(false); }
-    } catch { alert("Failed to delete"); }
+    } catch { toast.error("Failed to delete"); }
   };
 
   const handleToggle = async (id: number, isActive: boolean) => {
     try {
       await api.patch(`/admin/skill-tests/${id}/toggle`, { isActive });
       setTests((prev) => prev.map((t) => t.id === id ? { ...t, isActive } : t));
-    } catch { alert("Failed to toggle"); }
+    } catch { toast.error("Failed to toggle"); }
   };
 
   const handleSave = async () => {
@@ -115,7 +117,7 @@ export default function AdminSkillTestsPage() {
       setEditing(null);
       setCreating(false);
       fetchTests();
-    } catch { alert("Failed to save test"); }
+    } catch { toast.error("Failed to save test"); }
     finally { setSaving(false); }
   };
 
@@ -159,10 +161,10 @@ export default function AdminSkillTestsPage() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-white">{creating ? "Create Skill Test" : `Edit: ${editing.title}`}</h1>
           <div className="flex gap-2">
-            <button onClick={() => { setEditing(null); setCreating(false); }} className="px-4 py-2 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors text-sm flex items-center gap-2">
+            <button type="button" onClick={() => { setEditing(null); setCreating(false); }} className="px-4 py-2 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors text-sm flex items-center gap-2">
               <X className="w-4 h-4" /> Cancel
             </button>
-            <button onClick={handleSave} disabled={saving || !editing.skillName || !editing.title} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-50 text-sm flex items-center gap-2">
+            <button type="button" onClick={handleSave} disabled={saving || !editing.skillName || !editing.title} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-50 text-sm flex items-center gap-2">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
             </button>
           </div>
@@ -196,7 +198,7 @@ export default function AdminSkillTestsPage() {
         {/* Questions */}
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Questions ({editing.questions?.length ?? 0})</h2>
-          <button onClick={addQuestion} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors text-sm flex items-center gap-1">
+          <button type="button" onClick={addQuestion} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors text-sm flex items-center gap-1">
             <Plus className="w-4 h-4" /> Add Question
           </button>
         </div>
@@ -208,7 +210,7 @@ export default function AdminSkillTestsPage() {
                 {expandedQ === qi ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                 <span className="text-sm text-white flex-1 truncate">{q.question || `Question ${qi + 1}`}</span>
                 <span className="text-xs text-green-400">Correct: {["A", "B", "C", "D"][q.correctIndex]}</span>
-                <button onClick={(e) => { e.stopPropagation(); removeQuestion(qi); }} className="p-1 text-red-400 hover:bg-red-900/30 rounded">
+                <button type="button" onClick={(e) => { e.stopPropagation(); removeQuestion(qi); }} className="p-1 text-red-400 hover:bg-red-900/30 rounded">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -250,7 +252,7 @@ export default function AdminSkillTestsPage() {
           <BadgeCheck className="w-6 h-6 text-indigo-400" />
           <h1 className="text-2xl font-bold text-white">Skill Tests</h1>
         </div>
-        <button onClick={handleCreate} className="px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-500 transition-colors flex items-center gap-2">
+        <button type="button" onClick={handleCreate} className="px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-500 transition-colors flex items-center gap-2">
           <Plus className="w-4 h-4" /> Add Test
         </button>
       </div>
@@ -291,16 +293,16 @@ export default function AdminSkillTestsPage() {
                   <td className="px-4 py-3 text-sm text-gray-300">{test._count?.questions ?? 0}</td>
                   <td className="px-4 py-3 text-sm text-gray-300">{test._count?.attempts ?? 0}</td>
                   <td className="px-4 py-3">
-                    <button onClick={() => handleToggle(test.id, !test.isActive)} className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${test.isActive ? "bg-green-900/50 text-green-400 hover:bg-green-900/70" : "bg-gray-800 text-gray-500 hover:bg-gray-700"}`}>
+                    <button type="button" onClick={() => handleToggle(test.id, !test.isActive)} className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${test.isActive ? "bg-green-900/50 text-green-400 hover:bg-green-900/70" : "bg-gray-800 text-gray-500 hover:bg-gray-700"}`}>
                       {test.isActive ? "Active" : "Inactive"}
                     </button>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <button onClick={() => handleEdit(test.id)} className="p-2 rounded-lg bg-indigo-900/30 text-indigo-400 hover:bg-indigo-900/50 transition-colors">
+                      <button type="button" onClick={() => handleEdit(test.id)} className="p-2 rounded-lg bg-indigo-900/30 text-indigo-400 hover:bg-indigo-900/50 transition-colors">
                         <Pencil className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDelete(test.id, test.title)} className="p-2 rounded-lg bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors">
+                      <button type="button" onClick={() => handleDelete(test.id, test.title)} className="p-2 rounded-lg bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>

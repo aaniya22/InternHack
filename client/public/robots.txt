@@ -5,7 +5,8 @@ User-agent: *
 Allow: /
 Disallow: /student/
 Disallow: /admin/
-Disallow: /recruiters/dashboard
+Disallow: /recruiters/
+Disallow: /test-cover-letter
 Disallow: /api/
 Disallow: /*?*token=
 Disallow: /*?*auth=
@@ -54,4 +55,5 @@ Crawl-delay: 10
 User-agent: AhrefsBot
 Crawl-delay: 10
 
+# Sitemap index. Children: pages, companies, content, jobs, learn.
 Sitemap: https://www.internhack.xyz/sitemap.xml

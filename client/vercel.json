@@ -15,7 +15,11 @@
       "source": "/sitemap.xml",
       "destination": "https://api.internhack.xyz/sitemap.xml"
     },
-    { "source": "/((?!sitemap\\.xml|robots\\.txt|llms\\.txt|manifest\\.webmanifest|favicon\\.png|og-image\\.png|.*\\.(?:js|css|woff2?|ttf|otf|png|jpg|jpeg|webp|avif|svg|ico|map|json|txt|xml)).*)", "destination": "/index.html" }
+    { "source": "/sitemap-pages.xml", "destination": "https://api.internhack.xyz/sitemap-pages.xml" },
+    { "source": "/sitemap-companies.xml", "destination": "https://api.internhack.xyz/sitemap-companies.xml" },
+    { "source": "/sitemap-content.xml", "destination": "https://api.internhack.xyz/sitemap-content.xml" },
+    { "source": "/sitemap-jobs.xml", "destination": "https://api.internhack.xyz/sitemap-jobs.xml" },
+    { "source": "/((?!sitemap\\.xml|robots\\.txt|llms\\.txt|manifest\\.webmanifest|favicon\\.png|og-image\\.png|og-image-dark\\.png|.*\\.(?:js|css|woff2?|ttf|otf|png|jpg|jpeg|webp|avif|svg|ico|map|json|txt|xml)).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
@@ -24,8 +28,9 @@
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy", "value": "camera=(self), microphone=(self), geolocation=(), interest-cohort=()" },
-        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" }
+        { "key": "Permissions-Policy", "value": "camera=(self), microphone=(self), geolocation=()" },
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
+        { "key": "Content-Security-Policy-Report-Only", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; connect-src 'self' https://api.internhack.xyz https://www.google-analytics.com https://intern-hack-prod-bucket.s3.ap-south-1.amazonaws.com; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; frame-ancestors 'self'" }
       ]
     },
     {
@@ -35,7 +40,7 @@
       ]
     },
     {
-      "source": "/(robots\\.txt|llms\\.txt|manifest\\.webmanifest|sitemap\\.xml)",
+      "source": "/(robots\\.txt|llms\\.txt|manifest\\.webmanifest|sitemap(?:-[a-z]+)?\\.xml)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" }
       ]

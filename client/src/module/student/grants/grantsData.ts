@@ -12,6 +12,7 @@ import { grantsAiDeepTech } from "./grants-ai-deeptech";
 export interface Grant {
   id: number;
   name: string;
+  deadline: string;
   organization: string;
   logo: string;
   description: string;
@@ -37,15 +38,17 @@ export type GrantCategory =
   | "Climate"
   | "AI & Deep Tech";
 
+// Startup-relevant categories first (non-dilutive/founder funding), academic and
+// student-only categories last.
 export const GRANT_CATEGORIES: GrantCategory[] = [
   "Government",
-  "AI & Deep Tech",
-  "Climate",
   "Accelerator",
+  "AI & Deep Tech",
+  "Web3",
+  "Climate",
+  "Research",
   "University",
   "Global Youth",
-  "Research",
-  "Web3",
   "Education",
   "Gaming",
 ];

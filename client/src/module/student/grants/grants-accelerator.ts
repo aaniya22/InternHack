@@ -1,4 +1,4 @@
-import type { Grant } from "./grantsData";
+﻿import type { Grant } from "./grantsData";
 
 export const grantsAccelerator: Grant[] = [
   {
@@ -19,6 +19,7 @@ export const grantsAccelerator: Grant[] = [
       "Acceptance rate ~1%",
     ],
     status: "Active",
+    deadline: "2026-06-05",
     ecosystem: "USA",
     highlights: [
       "4,000+ companies funded globally",
@@ -44,6 +45,7 @@ export const grantsAccelerator: Grant[] = [
       "Focus on fintech, edtech, healthtech, and marketplaces",
     ],
     status: "Active",
+    deadline: "2026-06-10",
     ecosystem: "USA",
     highlights: [
       "2,800+ portfolio companies",
@@ -69,6 +71,7 @@ export const grantsAccelerator: Grant[] = [
       "Monthly stipend provided during residency",
     ],
     status: "Active",
+    deadline: "2026-06-15",
     ecosystem: "Global",
     highlights: [
       "Co-founder matching built into the program",
@@ -94,6 +97,7 @@ export const grantsAccelerator: Grant[] = [
       "Equity-free accelerator program; investment separate",
     ],
     status: "Active",
+    deadline: "2026-06-20",
     ecosystem: "USA",
     highlights: [
       "Equity-free accelerator program",
@@ -119,6 +123,7 @@ export const grantsAccelerator: Grant[] = [
       "No equity taken - competition-based prizes",
     ],
     status: "Active",
+    deadline: "2026-06-25",
     ecosystem: "USA",
     highlights: [
       "Zero equity - keeps 100% of your company",
@@ -144,6 +149,7 @@ export const grantsAccelerator: Grant[] = [
       "Focus on fintech, edtech, healthtech in developing economies",
     ],
     status: "Active",
+    deadline: "2026-06-30",
     ecosystem: "Global",
     highlights: [
       "Operates in 90+ emerging markets",
@@ -169,6 +175,7 @@ export const grantsAccelerator: Grant[] = [
       "Global applicants welcome",
     ],
     status: "Active",
+    deadline: "2026-07-05",
     ecosystem: "USA",
     highlights: [
       "1,200+ companies funded",
@@ -194,6 +201,7 @@ export const grantsAccelerator: Grant[] = [
       "Post-MVP startups with some traction preferred",
     ],
     status: "Active",
+    deadline: "2026-07-10",
     ecosystem: "UK",
     highlights: [
       "Dedicated engineering and design support",
@@ -219,6 +227,7 @@ export const grantsAccelerator: Grant[] = [
       "Must commit full-time to the 6-month program",
     ],
     status: "Active",
+    deadline: "2026-07-15",
     ecosystem: "UK",
     highlights: [
       "Invest at the individual level - before a company exists",
@@ -244,6 +253,7 @@ export const grantsAccelerator: Grant[] = [
       "Sectors: SaaS, consumer tech, fintech, healthtech",
     ],
     status: "Active",
+    deadline: "2026-07-20",
     ecosystem: "India",
     highlights: [
       "India's longest-running VC firm (since 2006)",
@@ -269,6 +279,7 @@ export const grantsAccelerator: Grant[] = [
       "Must not have previously received Google Cloud startup credits",
     ],
     status: "Active",
+    deadline: "2026-07-25",
     ecosystem: "Global",
     highlights: [
       "$200K credits over 2 years for approved startups",
@@ -294,6 +305,7 @@ export const grantsAccelerator: Grant[] = [
       "Self-service tier: $1,000 credits for any startup",
     ],
     status: "Active",
+    deadline: "2026-07-30",
     ecosystem: "Global",
     highlights: [
       "Up to $100K credits through VC/accelerator partnerships",
@@ -319,6 +331,7 @@ export const grantsAccelerator: Grant[] = [
       "Credits scale up as startup progresses through milestones",
     ],
     status: "Active",
+    deadline: "2026-08-04",
     ecosystem: "Global",
     highlights: [
       "No application gatekeeping - open to all startups",
@@ -344,6 +357,7 @@ export const grantsAccelerator: Grant[] = [
       "Both investment and grant-based programs",
     ],
     status: "Active",
+    deadline: "2026-08-09",
     ecosystem: "Global",
     highlights: [
       "$1B+ invested through Country Digital Acceleration",
@@ -369,6 +383,7 @@ export const grantsAccelerator: Grant[] = [
       "Partnership track for commercial collaboration",
     ],
     status: "Active",
+    deadline: "2026-08-14",
     ecosystem: "USA",
     highlights: [
       "$120K in IBM Cloud credits",
@@ -394,6 +409,7 @@ export const grantsAccelerator: Grant[] = [
       "Focus on workforce development, sustainability, and equality",
     ],
     status: "Active",
+    deadline: "2026-08-19",
     ecosystem: "USA",
     highlights: [
       "$100M+ Impact Fund for mission-driven startups",
@@ -419,6 +435,7 @@ export const grantsAccelerator: Grant[] = [
       "Both early-stage and growth-stage programs available",
     ],
     status: "Active",
+    deadline: "2026-08-24",
     ecosystem: "Global",
     highlights: [
       "Equity-free accelerator - no dilution",
@@ -444,6 +461,7 @@ export const grantsAccelerator: Grant[] = [
       "Annual program with October deadline",
     ],
     status: "Active",
+    deadline: "2026-08-29",
     ecosystem: "USA",
     highlights: [
       "$100K shared between 2 PhD students per team",
@@ -469,6 +487,7 @@ export const grantsAccelerator: Grant[] = [
       "Rolling applications accepted",
     ],
     status: "Active",
+    deadline: "2026-09-03",
     ecosystem: "Global",
     highlights: [
       "Focus on design education and creative empowerment",
@@ -494,11 +513,64 @@ export const grantsAccelerator: Grant[] = [
       "Both individual and institutional applications accepted",
     ],
     status: "Active",
+    deadline: "2026-09-08",
     ecosystem: "Germany",
     highlights: [
       "One of Europe's largest corporate foundations",
       "€1.2B+ distributed since 1964",
       "Supports research, education, and international dialogue",
+    ],
+  },
+  {
+    id: 157,
+    name: "Y Combinator",
+    organization: "Y Combinator",
+    logo: "https://placehold.co/100x100/EEE/999?text=Y",
+    description:
+      "Y Combinator runs three-month accelerator batches in San Francisco, investing in every accepted startup on the same standard terms and connecting founders to its General Partners, alumni network, and demo day investors.",
+    fundingAmount: "$500,000",
+    category: "Accelerator",
+    tags: ["Accelerator", "Seed", "Demo Day", "Global"],
+    website: "https://www.ycombinator.com/apply",
+    eligibility: [
+      "Startups at any stage, anywhere in the world",
+      "YC invests in US, Canada, Cayman, or Singapore-incorporated companies",
+      "Online application followed by an interview for shortlisted teams",
+      "Highly competitive - decisions typically same-day as interview",
+    ],
+    status: "Active",
+    deadline: "2026-07-27",
+    ecosystem: "USA",
+    highlights: [
+      "$125K for 7% equity + $375K uncapped MFN SAFE, no program fees",
+      "3-day kickoff plus weekly group office hours during the batch",
+      "Access to the full YC alumni and investor network post-batch",
+    ],
+  },
+  {
+    id: 158,
+    name: "NVIDIA Inception Program",
+    organization: "NVIDIA",
+    logo: "https://placehold.co/100x100/EEE/999?text=N",
+    description:
+      "A free membership program for AI startups that provides cloud credits, discounted hardware/software, technical training via the NVIDIA Deep Learning Institute, and exposure to a global network of investors, with no application, membership, or equity fees.",
+    fundingAmount: "Free membership + cloud credits",
+    category: "Accelerator",
+    tags: ["AI", "Cloud Credits", "No Equity", "Global"],
+    website: "https://www.nvidia.com/en-us/startups/",
+    eligibility: [
+      "Startups building AI, data science, or accelerated-computing products",
+      "No funding round or revenue minimum to apply",
+      "Free to join - no equity or membership fees",
+      "Must keep product/company details updated in the Inception portal",
+    ],
+    status: "Active",
+    deadline: "2027-01-31",
+    ecosystem: "Global",
+    highlights: [
+      "No equity or fees taken - free membership",
+      "Free cloud credits from NVIDIA and partners (e.g. up to $150K via Nebius)",
+      "Preferred pricing on NVIDIA hardware/software plus DLI training",
     ],
   },
 ];

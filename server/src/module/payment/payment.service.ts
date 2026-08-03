@@ -1,12 +1,17 @@
-import DodoPayments from "dodopayments";
+import { DodoPayments } from "dodopayments";
 import { prisma } from "../../database/db.js";
 import { sendEmail } from "../../utils/email.utils.js";
 import { premiumConfirmationEmailHtml } from "../../utils/email-templates.js";
+import { invalidateUserTierCache } from "../../utils/premium.utils.js";
+import { ExpertSessionService } from "../expert-session/expert-session.service.js";
+
+const expertSessionService = new ExpertSessionService();
 
 // ── Product IDs (set in Dodo dashboard, referenced by env vars) ──
 const PRODUCT_IDS = {
   MONTHLY: process.env["DODO_PRODUCT_ID_MONTHLY"] ?? "prod_monthly_pro",
   YEARLY: process.env["DODO_PRODUCT_ID_YEARLY"] ?? "prod_yearly_pro",
+  EXPERT_SESSION: process.env["DODO_PRODUCT_ID_EXPERT_SESSION"] ?? "",
 } as const;
 
 type PlanKey = "pro";
@@ -92,6 +97,38 @@ export class PaymentService {
     };
   }
 
+  // ── Create a Dodo checkout session for a one-time ₹49 expert session ──
+  async createExpertSessionCheckout(
+    userId: number,
+    expertSessionId: number,
+    user: { email: string },
+  ) {
+    if (!PRODUCT_IDS.EXPERT_SESSION) {
+      throw new Error("Expert session payments are not configured. Set DODO_PRODUCT_ID_EXPERT_SESSION.");
+    }
+
+    const dbUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    });
+
+    const session = await this.requireDodo().checkoutSessions.create({
+      product_cart: [{ product_id: PRODUCT_IDS.EXPERT_SESSION, quantity: 1 }],
+      customer: { email: user.email, name: dbUser?.name ?? undefined },
+      return_url: process.env["DODO_RETURN_URL"] ?? undefined,
+      metadata: {
+        userId: String(userId),
+        purpose: "expert_session",
+        expertSessionId: String(expertSessionId),
+      },
+    });
+
+    return {
+      checkoutUrl: session.checkout_url,
+      sessionId: session.session_id,
+    };
+  }
+
   // ── Handle Dodo webhook events ─────────────────────────────────
   async handleWebhook(rawBody: string, headers: Record<string, string>) {
     const event = this.requireDodo().webhooks.unwrap(rawBody, { headers });
@@ -99,12 +136,17 @@ export class PaymentService {
     switch (event.type) {
       case "payment.succeeded": {
         const payment = event.data;
+        if (payment.metadata?.["purpose"] === "expert_session") {
+          if (payment.checkout_session_id) {
+            await expertSessionService.confirmBooking(payment.checkout_session_id);
+          }
+          break;
+        }
         // Update payment record if we can find it by checkout session id
         if (payment.checkout_session_id) {
           await prisma.payment.updateMany({
             where: { dodoPaymentId: payment.checkout_session_id },
             data: {
-              dodoPaymentId: payment.payment_id,
               amount: payment.total_amount,
               currency: payment.currency,
               status: "SUCCESS",
@@ -116,11 +158,16 @@ export class PaymentService {
 
       case "payment.failed": {
         const payment = event.data;
+        if (payment.metadata?.["purpose"] === "expert_session") {
+          if (payment.checkout_session_id) {
+            await expertSessionService.cancelPendingBooking(payment.checkout_session_id);
+          }
+          break;
+        }
         if (payment.checkout_session_id) {
           await prisma.payment.updateMany({
             where: { dodoPaymentId: payment.checkout_session_id },
             data: {
-              dodoPaymentId: payment.payment_id,
               status: "FAILED",
             },
           });
@@ -180,22 +227,90 @@ export class PaymentService {
     const now = new Date();
     const endDate = new Date(sub.next_billing_date);
 
-    // Link subscription ID and mark payment SUCCESS first, then activate the user.
-    // Order matters: payment record must be linked before any code looks it up by subscription_id.
-    await prisma.payment.updateMany({
-      where: { userId, status: "PENDING" },
-      data: { dodoSubscriptionId: sub.subscription_id, status: "SUCCESS" },
+    // Wrap entire subscription activation in database transaction to prevent
+    // race conditions where concurrent webhooks create duplicate records.
+    // All operations must succeed atomically or entire transaction rolls back.
+    await prisma.$transaction(async (tx) => {
+      // Check if this specific subscription ID has already been activated to prevent
+      // duplicate webhook deliveries from creating duplicate records or placeholders.
+      // We do NOT check `user.subscriptionStatus === "ACTIVE"` here, because that would
+      // incorrectly block legitimate subscription upgrades (e.g. Monthly to Yearly).
+      const alreadyActivated = await tx.payment.findFirst({
+        where: { dodoSubscriptionId: sub.subscription_id },
+        select: { id: true },
+      });
+
+      if (alreadyActivated) {
+        console.log(`[Webhook] Subscription ${sub.subscription_id} already activated, skipping duplicate delivery`);
+        return;
+      }
+
+      // Link payment record to subscription. Try SUCCESS first (normal flow),
+      // then fall back to the most recent PENDING record to handle the race
+      // where subscription.active arrives before payment.succeeded.
+      let payment = await tx.payment.findFirst({
+        where: {
+          userId,
+          dodoSubscriptionId: null,
+          status: "SUCCESS",
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        select: { id: true },
+      });
+
+      if (!payment) {
+        payment = await tx.payment.findFirst({
+          where: {
+            userId,
+            dodoSubscriptionId: null,
+            status: "PENDING",
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          select: { id: true },
+        });
+      }
+
+      if (!payment) {
+        // No payment record exists yet — create a placeholder that will be
+        // updated to SUCCESS when payment.succeeded arrives
+        await tx.payment.create({
+          data: {
+            userId,
+            amount: 0,
+            currency: "USD",
+            status: "PENDING",
+            dodoSubscriptionId: sub.subscription_id,
+            plan,
+            billing: sub.metadata["billing"] ?? "monthly",
+          },
+        });
+      } else {
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            dodoSubscriptionId: sub.subscription_id,
+          },
+        });
+      }
+
+      // Update user subscription status atomically
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          subscriptionPlan: plan,
+          subscriptionStatus: "ACTIVE",
+          subscriptionStartDate: now,
+          subscriptionEndDate: endDate,
+        },
+      });
     });
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        subscriptionPlan: plan,
-        subscriptionStatus: "ACTIVE",
-        subscriptionStartDate: now,
-        subscriptionEndDate: endDate,
-      },
-    });
+    // Invalidate cache after transaction succeeds
+    await invalidateUserTierCache(userId);
 
     // Send confirmation email
     const user = await prisma.user.findUnique({
@@ -222,6 +337,7 @@ export class PaymentService {
       where: { id: payment.userId },
       data: { subscriptionStatus: "CANCELLED" },
     });
+    await invalidateUserTierCache(payment.userId);
   }
 
   private async expireSubscription(subscriptionId: string) {
@@ -238,6 +354,7 @@ export class PaymentService {
         subscriptionPlan: "FREE",
       },
     });
+    await invalidateUserTierCache(payment.userId);
   }
 
   private async holdSubscription(subscriptionId: string) {
@@ -249,8 +366,12 @@ export class PaymentService {
 
     await prisma.user.update({
       where: { id: payment.userId },
-      data: { subscriptionStatus: "EXPIRED" },
+      data: {
+        subscriptionStatus: "EXPIRED",
+        subscriptionPlan: "FREE",
+      },
     });
+    await invalidateUserTierCache(payment.userId);
   }
 
   private async renewSubscription(sub: { subscription_id: string; next_billing_date: string; metadata: Record<string, string> }) {
@@ -260,13 +381,18 @@ export class PaymentService {
     });
     if (!payment) return;
 
+    const billing = sub.metadata["billing"] ?? "monthly";
+    const plan = billing === "yearly" ? "YEARLY" : "MONTHLY";
+
     await prisma.user.update({
       where: { id: payment.userId },
       data: {
+        subscriptionPlan: plan,
         subscriptionStatus: "ACTIVE",
         subscriptionEndDate: new Date(sub.next_billing_date),
       },
     });
+    await invalidateUserTierCache(payment.userId);
   }
 
   // ── Check checkout session status (for client polling) ─────────

@@ -10,6 +10,7 @@ import {
   GraduationCap,
   Layers,
   Map,
+  Network,
   Palette,
   Play,
   Server,
@@ -37,6 +38,14 @@ export interface Track {
   lessonCountKey?: string;
   /** Absolute path override. When present, the card links here instead of `/learn/${path}`. */
   to?: string;
+  /** Track IDs that should be completed before starting this track. */
+  prerequisites?: string[];
+  /** Human-readable prerequisite hint shown on the card. */
+  prerequisiteText?: string;
+  tags?: string[];
+  difficulty?: "Beginner" | "Intermediate" | "Advanced";
+  createdAt?: string;
+  enrolledStudents?: number;
 }
 
 export const TRACKS: Track[] = [
@@ -99,6 +108,20 @@ export const TRACKS: Track[] = [
     stat: "Animated lessons",
   },
   {
+    id: "computer-networks",
+    title: "Computer Networks",
+    description:
+      "Animated, interactive lessons - OSI & TCP/IP, encapsulation, MAC & ARP, IP addressing & subnetting, TCP vs UDP, DNS, HTTP/TLS, and routing.",
+    icon: Network,
+    color: "text-lime-500",
+    bgColor: "bg-lime-50 dark:bg-lime-900/30",
+    borderHover: "hover:border-lime-200 dark:hover:border-lime-800",
+    path: "computer-networks",
+    kind: "lesson",
+    category: "practice",
+    stat: "Animated lessons",
+  },
+  {
     id: "aptitude",
     title: "Aptitude",
     description:
@@ -143,6 +166,8 @@ export const TRACKS: Track[] = [
     category: "frontend",
     stat: "Lessons",
     lessonCountKey: "css",
+    prerequisites: ["html"],
+    prerequisiteText: "You should know HTML basics before starting CSS",
   },
   {
     id: "javascript",
@@ -158,6 +183,8 @@ export const TRACKS: Track[] = [
     category: "frontend",
     stat: "Lessons",
     lessonCountKey: "javascript",
+    prerequisites: ["html"],
+    prerequisiteText: "You should know HTML basics before starting JavaScript",
   },
   {
     id: "typescript",
@@ -173,6 +200,8 @@ export const TRACKS: Track[] = [
     category: "frontend",
     stat: "Lessons",
     lessonCountKey: "typescript",
+    prerequisites: ["javascript"],
+    prerequisiteText: "You should know JavaScript fundamentals before starting TypeScript",
   },
   {
     id: "react",
@@ -188,6 +217,8 @@ export const TRACKS: Track[] = [
     category: "frontend",
     stat: "Lessons",
     lessonCountKey: "react",
+    prerequisites: ["html", "javascript"],
+    prerequisiteText: "You should know HTML basics and JavaScript fundamentals before starting React",
   },
 
   // ── Backend ──
@@ -205,6 +236,8 @@ export const TRACKS: Track[] = [
     category: "backend",
     stat: "Lessons",
     lessonCountKey: "nodejs",
+    prerequisites: ["javascript"],
+    prerequisiteText: "You should know JavaScript fundamentals before starting Node.js",
   },
   {
     id: "python",
@@ -235,6 +268,8 @@ export const TRACKS: Track[] = [
     category: "backend",
     stat: "Lessons",
     lessonCountKey: "fastapi",
+    prerequisites: ["python"],
+    prerequisiteText: "You should know Python basics before starting FastAPI",
   },
   {
     id: "flask",
@@ -250,6 +285,8 @@ export const TRACKS: Track[] = [
     category: "backend",
     stat: "Lessons",
     lessonCountKey: "flask",
+    prerequisites: ["python"],
+    prerequisiteText: "You should know Python basics before starting Flask",
   },
   {
     id: "django",
@@ -265,6 +302,8 @@ export const TRACKS: Track[] = [
     category: "backend",
     stat: "Lessons",
     lessonCountKey: "django",
+    prerequisites: ["python"],
+    prerequisiteText: "You should know Python basics before starting Django",
   },
 
   // ── Data ──
@@ -311,6 +350,7 @@ export const TRACKS: Track[] = [
     kind: "lesson",
     category: "web3",
     stat: "35 Projects",
+    difficulty: "Beginner", //mock testing
   },
 ];
 

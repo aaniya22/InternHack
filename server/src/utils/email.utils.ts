@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { withUnsubscribeFooter } from "./unsubscribe.utils.js";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
@@ -18,9 +19,34 @@ export async function sendEmail(options: {
   html: string;
   text?: string;
   attachments?: EmailAttachment[];
+  /**
+   * For non-transactional email (digests, reminders, announcements): adds an
+   * unsubscribe footer link and RFC 8058 List-Unsubscribe headers. Callers must
+   * also filter recipients on user.unsubscribeDigest before sending.
+   */
+  unsubscribeUrl?: string;
 }): Promise<boolean> {
   if (!resend) {
     console.warn(`[Email] RESEND_API_KEY not set — skipping email "${options.subject}" to ${options.to}`);
+    
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`\n==================================================`);
+      console.log(`[Email Dev Fallback] To: ${options.to}`);
+      console.log(`[Email Dev Fallback] Subject: ${options.subject}`);
+
+      // Parse individual digits from styled OTP cells (e.g. <td>8</td>)
+      const cellMatches = [...options.html.matchAll(/>(\d)<\/td>/g)];
+      if (cellMatches.length === 6) {
+        const otpCode = cellMatches.map((m) => m[1]).join("");
+        console.log(`[Email Dev Fallback] OTP Code Found: ${otpCode}`);
+      } else {
+        const otpMatch = options.html.match(/\b\d{6}\b/);
+        if (otpMatch) {
+          console.log(`[Email Dev Fallback] OTP Code Found: ${otpMatch[0]}`);
+        }
+      }
+      console.log(`==================================================\n`);
+    }
     return false;
   }
   console.log(`[Email] Sending "${options.subject}" to ${options.to}`);
@@ -37,8 +63,16 @@ export async function sendEmail(options: {
       from,
       to,
       subject: options.subject,
-      html: options.html,
+      html: options.unsubscribeUrl
+        ? withUnsubscribeFooter(options.html, options.unsubscribeUrl)
+        : options.html,
     };
+    if (options.unsubscribeUrl) {
+      payload.headers = {
+        "List-Unsubscribe": `<${options.unsubscribeUrl}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      };
+    }
     if (options.text) {
       payload.text = options.text;
     }
@@ -70,7 +104,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Retries the whole batch on 429 with exponential backoff.
  */
 export async function sendEmailBatch(
-  emails: { to: string; subject: string; html: string }[],
+  emails: { to: string; subject: string; html: string; unsubscribeUrl?: string }[],
   opts: { maxRetries?: number } = {},
 ): Promise<{ sent: number; failed: number; errors: string[] }> {
   if (emails.length === 0) return { sent: 0, failed: 0, errors: [] };
@@ -80,7 +114,24 @@ export async function sendEmailBatch(
   }
   if (emails.length > 100) throw new Error("Resend batch supports max 100 emails per call");
 
-  const payload = emails.map((e) => ({ from: FROM(), to: e.to, subject: e.subject, html: e.html }));
+  const from = FROM();
+  const isSandboxDev = from === TEST_FROM && process.env.NODE_ENV !== "production";
+  const testTo = process.env.RESEND_TEST_TO || DEFAULT_TEST_TO;
+
+  const payload = emails.map((e) => ({
+    from,
+    to: isSandboxDev ? testTo : e.to,
+    subject: e.subject,
+    html: e.unsubscribeUrl ? withUnsubscribeFooter(e.html, e.unsubscribeUrl) : e.html,
+    ...(e.unsubscribeUrl
+      ? {
+          headers: {
+            "List-Unsubscribe": `<${e.unsubscribeUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
+        }
+      : {}),
+  }));
   const maxRetries = opts.maxRetries ?? 4;
 
   const parseRetryAfter = (err: unknown): number | null => {
@@ -97,7 +148,12 @@ export async function sendEmailBatch(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const result = await resend.batch.send(payload);
+      const result = await Promise.race([
+        resend.batch.send(payload),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Resend batch.send timed out after 30s")), 30_000)
+        ),
+      ]);
       if (result.error) {
         const status = (result.error as { statusCode?: number }).statusCode;
         if (status === 429 && attempt < maxRetries) {

@@ -1,28 +1,28 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { motion } from "framer-motion";
 import {
-  CheckCircle2, Building2, Puzzle, Bookmark, ArrowRight,
-  Lock, Search, BookOpen, TrendingUp, Target, Download,
+CheckCircle2, Building2, Bookmark, ArrowRight,
+  Lock, Search, BookOpen, TrendingUp, Target, X,
 } from "lucide-react";
 import { PaginationControls } from "../../../components/ui/PaginationControls";
+import { Button } from "../../../components/ui/button";
 import api from "../../../lib/axios";
 import { queryKeys } from "../../../lib/query-keys";
-import type { DsaTopicsResponse, DsaProgress, LeetcodeImportStatus } from "../../../lib/types";
+import type { DsaTopicsResponse, DsaProgress, DsaTopic, User } from "../../../lib/types";
 import { useAuthStore } from "../../../lib/auth.store";
 import { SEO } from "../../../components/SEO";
-import { canonicalUrl } from "../../../lib/seo.utils";
+import { canonicalUrl,SITE_URL } from "../../../lib/seo.utils";
+import { courseSchema, breadcrumbSchema, faqSchema } from "../../../lib/structured-data";
 import { LoadingScreen } from "../../../components/LoadingScreen";
 import { LoginGate } from "../../../components/LoginGate";
 import { LeetCodeSync } from "./components/LeetCodeSync";
-import { LeetcodeImportModal } from "./components/LeetcodeImportModal";
 import { DsaHeatmap } from "./components/DsaHeatmap";
 import { ResultCount } from "../../../components/ui/ResultCount";
+import { FilterChip } from "../../../components/ui/FilterChip";
 
-const FREE_LIMIT = 5;
 const TOPICS_PER_PAGE = 20;
-const IMPORT_ENABLED = import.meta.env["VITE_LEETCODE_IMPORT_ENABLED"] !== "false";
 
 type DifficultyTab = "all" | "easy" | "medium-hard";
 
@@ -52,12 +52,142 @@ function CircularProgress({ progress }: { progress: number }) {
   );
 }
 
+const DsaTopicCard = React.memo(function DsaTopicCard({
+  topic,
+  idx,
+  page,
+  user,
+  onShowGate,
+}: {
+  topic: DsaTopic;
+  idx: number;
+  page: number;
+  user: User | null;
+  onShowGate: () => void;
+}) {
+  const FREE_LIMIT = 5;
+  const TOPICS_PER_PAGE = 24;
+
+  const pct =
+    topic.problemCount > 0
+      ? Math.min(
+          100,
+          Math.max(
+            0,
+            Math.round((topic.solvedCount / topic.problemCount) * 100)
+          )
+        )
+      : 0;
+  const isComplete = pct === 100;
+  const isLocked = topic.orderIndex >= FREE_LIMIT && !user;
+  const globalIdx = (page - 1) * TOPICS_PER_PAGE + idx + 1;
+  const topicNum = String(globalIdx).padStart(2, "0");
+
+  const inner = (
+    <>
+      <div className="flex flex-col items-center gap-1 shrink-0 w-11">
+        {isLocked ? (
+          <div className="w-11 h-11 rounded-md bg-stone-100 dark:bg-white/5 flex items-center justify-center">
+            <Lock className="w-4 h-4 text-stone-400 dark:text-stone-500" />
+          </div>
+        ) : user ? (
+          <CircularProgress progress={pct} />
+        ) : (
+          <div className="w-11 h-11 rounded-md bg-stone-100 dark:bg-white/5 flex items-center justify-center">
+            <span className="text-[11px] font-mono font-bold tabular-nums text-stone-500 dark:text-stone-400">
+              {topicNum}
+            </span>
+          </div>
+        )}
+        {!isLocked && user && (
+          <span className="text-[10px] font-mono uppercase tracking-widest text-stone-400 dark:text-stone-500">
+            / {topicNum}
+          </span>
+        )}
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <h3 className="text-sm font-bold tracking-tight text-stone-900 dark:text-stone-50 truncate">
+            {topic.name}
+          </h3>
+          {isComplete && user && (
+            <CheckCircle2 className="w-3.5 h-3.5 text-lime-500 shrink-0" />
+          )}
+        </div>
+        {user && !isLocked ? (
+          <>
+            <div className="w-full h-0.5 bg-stone-200 dark:bg-white/10 overflow-hidden mb-2">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${pct}%` }}
+                transition={{ duration: 0.6, delay: Math.min(idx, 10) * 0.03 }}
+                className={`h-full ${
+                  isComplete
+                    ? "bg-lime-400"
+                    : pct > 0
+                    ? "bg-stone-900 dark:bg-stone-50"
+                    : "bg-transparent"
+                }`}
+              />
+            </div>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500 dark:text-stone-400 tabular-nums">
+              <span className="text-stone-900 dark:text-stone-50">
+                {topic.solvedCount}
+              </span>
+              <span className="text-stone-400 dark:text-stone-600">
+                {" "}
+                / {topic.problemCount} problems
+              </span>
+            </span>
+          </>
+        ) : (
+          <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500 dark:text-stone-400 tabular-nums">
+            {topic.problemCount} problems
+          </span>
+        )}
+      </div>
+
+      <div className="shrink-0">
+        {isLocked ? (
+          <Lock className="w-4 h-4 text-stone-300 dark:text-stone-600" />
+        ) : (
+          <ArrowRight className="w-4 h-4 text-stone-400 dark:text-stone-500 group-hover:text-lime-600 dark:group-hover:text-lime-400 group-hover:translate-x-0.5 transition-all" />
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(idx, 10) * 0.03 }}
+    >
+      {isLocked ? (
+        <button
+          onClick={onShowGate}
+          className="group w-full flex items-center gap-3 sm:gap-4 bg-white dark:bg-stone-900 px-3 sm:px-5 py-3 sm:py-4 rounded-md border border-stone-200 dark:border-white/10 opacity-70 hover:opacity-100 hover:border-stone-400 dark:hover:border-white/25 transition-all text-left cursor-pointer"
+        >
+          {inner}
+        </button>
+      ) : (
+        <Link
+          to={`/learn/dsa/${topic.slug}`}
+          className="group flex items-center gap-3 sm:gap-4 bg-white dark:bg-stone-900 px-3 sm:px-5 py-3 sm:py-4 rounded-md border border-stone-200 dark:border-white/10 hover:border-stone-400 dark:hover:border-white/25 transition-colors no-underline"
+        >
+          {inner}
+        </Link>
+      )}
+    </motion.div>
+  );
+});
+
 export default function DsaTopicsPage() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<DifficultyTab>("all");
   const [showGate, setShowGate] = useState(false);
-  const [showImport, setShowImport] = useState(false);
   const [page, setPage] = useState(1);
   const [topicSearch, setTopicSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -69,7 +199,13 @@ export default function DsaTopicsPage() {
     }, 300);
     return () => clearTimeout(t);
   }, [topicSearch]);
+const clearFilters = () => {
+    setTopicSearch("");
+    setActiveTab("all");
+    setPage(1);
+  };
 
+  const hasFilters = topicSearch.trim() !== "" || activeTab !== "all";
   const difficultyParam =
     activeTab === "easy" ? "Easy" :
       activeTab === "medium-hard" ? "Medium,Hard" :
@@ -97,14 +233,6 @@ export default function DsaTopicsPage() {
     enabled: !!user,
     staleTime: 15 * 24 * 60 * 60 * 1000,
   });
-
-  const { data: importStatus } = useQuery({
-    queryKey: queryKeys.dsa.importStatus(),
-    queryFn: () => api.get<LeetcodeImportStatus>("/dsa/import/status").then((r) => r.data),
-    enabled: !!user && IMPORT_ENABLED,
-    staleTime: 5 * 60 * 1000,
-  });
-
   const totalProblems = uniqueProblems;
   const rawSolved = topics?.reduce((s, t) => s + t.solvedCount, 0) ?? 0;
   const totalSolved = Math.max(0, Math.min(rawSolved, totalProblems));
@@ -125,8 +253,9 @@ export default function DsaTopicsPage() {
 
   const quickLinks = [
     { to: "/learn/dsa/companies", icon: Building2, label: "companies" },
-    { to: "/learn/dsa/patterns", icon: Puzzle, label: "patterns" },
-    ...(user ? [{ to: "/learn/dsa/bookmarks", icon: Bookmark, label: "bookmarks" }] : []),
+    ...(user
+      ? [{ to: "/learn/dsa/bookmarks", icon: Bookmark, label: "bookmarks" }]
+      : []),
   ];
 
   return (
@@ -136,6 +265,23 @@ export default function DsaTopicsPage() {
         description="Practice data structures and algorithms problems organized by topic. Track your progress across arrays, trees, graphs, dynamic programming, and more."
         keywords="DSA practice, data structures, algorithms, leetcode, coding interview, arrays, trees, graphs, dynamic programming"
         canonicalUrl={canonicalUrl("/learn/dsa")}
+        structuredData={[
+          courseSchema({
+            name: "DSA Practice — Data Structures & Algorithms | InternHack",
+            description: "Practice data structures and algorithms problems organized by topic. Track your progress across arrays, trees, graphs, dynamic programming, and more.",
+            url: `${SITE_URL}/learn/dsa`,
+          }),
+          breadcrumbSchema([
+            { name: "Home", url: SITE_URL },
+            { name: "Learn", url: `${SITE_URL}/learn` },
+            { name: "DSA", url: `${SITE_URL}/learn/dsa` },
+          ]),
+          faqSchema([
+            { question: "Is this DSA course free?", answer: "Yes, the Data Structures and Algorithms course on InternHack is completely free with no sign-up required." },
+            { question: "What will I learn in this DSA course?", answer: "You will learn arrays, stacks, queues, trees, graphs, sorting algorithms, dynamic programming, and problem-solving patterns." },
+            { question: "Why is DSA important for interviews?", answer: "DSA is essential for coding interviews at top tech companies as it tests your problem-solving and algorithmic thinking skills." },
+          ]),
+        ]}
       />
 
       <div className="max-w-6xl mx-auto px-3 sm:px-8 py-8">
@@ -170,16 +316,6 @@ export default function DsaTopicsPage() {
                 <span className="h-1 w-1 bg-stone-300 dark:bg-stone-700" />
                 <span className="text-lime-600 dark:text-lime-400 tabular-nums">{overallPct}% complete</span>
               </div>
-              {user && IMPORT_ENABLED && (
-                <button
-                  id="lc-import-open-btn"
-                  onClick={() => setShowImport(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-stone-200 dark:border-white/10 text-stone-600 dark:text-stone-400 hover:border-lime-400 dark:hover:border-lime-500 hover:text-lime-600 dark:hover:text-lime-400 transition-colors bg-white dark:bg-stone-900"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Import from LeetCode
-                </button>
-              )}
             </div>
           </div>
         </motion.div>
@@ -214,30 +350,6 @@ export default function DsaTopicsPage() {
             </div>
           ))}
         </motion.div>
-
-        {/* "Already imported" banner */}
-        {user && IMPORT_ENABLED && importStatus?.lastImport && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex items-center justify-between gap-3 px-4 py-2.5 mb-4 rounded-md bg-lime-50 dark:bg-lime-950/20 border border-lime-200 dark:border-lime-800"
-          >
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-3.5 h-3.5 text-lime-600 dark:text-lime-400 shrink-0" />
-              <span className="text-[11px] text-stone-700 dark:text-stone-300">
-                Imported{importStatus.lastImport.username ? ` from @${importStatus.lastImport.username}` : " via CSV"} on{" "}
-                {new Date(importStatus.lastImport.importedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                {" "}· {importStatus.lastImport.imported} problems
-              </span>
-            </div>
-            <button
-              onClick={() => setShowImport(true)}
-              className="text-[10px] font-mono uppercase tracking-widest text-lime-700 dark:text-lime-400 hover:underline shrink-0 cursor-pointer"
-            >
-              re-import
-            </button>
-          </motion.div>
-        )}
 
         {/* Difficulty breakdown (logged-in) */}
         {user && progress && (
@@ -285,12 +397,13 @@ export default function DsaTopicsPage() {
           </motion.div>
         )}
 
-        {/* Heatmap (logged-in) */}
+        {/* Practice history heatmap (logged-in) */}
         {user && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.09 }}
+            className="mb-8"
           >
             <DsaHeatmap />
           </motion.div>
@@ -320,8 +433,8 @@ export default function DsaTopicsPage() {
           ))}
         </motion.div>
 
-        {/* LeetCode Sync — only for logged-in students */}
-        {user && (
+        {/* LeetCode Sync — only when the profile already has a LeetCode URL, never asks inline */}
+        {user?.leetcodeUrl && (
           <LeetCodeSync
             onSyncSuccess={() => {
               queryClient.invalidateQueries({ queryKey: queryKeys.dsa.topics("") });
@@ -352,21 +465,19 @@ export default function DsaTopicsPage() {
             <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500 mr-1">
               difficulty /
             </span>
-            {tabs.map((tab) => {
-              const active = activeTab === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  onClick={() => { setActiveTab(tab.key); setPage(1); }}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${active
-                    ? "bg-stone-900 dark:bg-stone-50 text-stone-50 dark:text-stone-900 border-stone-900 dark:border-stone-50"
-                    : "bg-transparent text-stone-600 dark:text-stone-400 border-stone-300 dark:border-white/10 hover:border-stone-500 dark:hover:border-white/30 hover:text-stone-900 dark:hover:text-stone-50"
-                    }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
+            {tabs.map((tab) => (
+              <FilterChip
+                key={tab.key}
+                label={tab.label}
+                active={activeTab === tab.key}
+                onClick={() => { setActiveTab(tab.key); setPage(1); }}
+              />
+            ))}
+{hasFilters && (
+              <Button onClick={clearFilters} variant="ghost" size="sm">
+                <X className="w-3 h-3" /> clear
+              </Button>
+            )}
           </div>
         </motion.div>
 
@@ -382,104 +493,16 @@ export default function DsaTopicsPage() {
 
         {/* Topic list */}
         <div className="space-y-2">
-          {paginatedTopics?.map((topic, idx) => {
-            const pct = topic.problemCount > 0
-              ? Math.min(100, Math.max(0, Math.round((topic.solvedCount / topic.problemCount) * 100)))
-              : 0;
-            const isComplete = pct === 100;
-            const isLocked = topic.orderIndex >= FREE_LIMIT && !user;
-            const globalIdx = (page - 1) * TOPICS_PER_PAGE + idx + 1;
-            const topicNum = String(globalIdx).padStart(2, "0");
-
-            const inner = (
-              <>
-                <div className="flex flex-col items-center gap-1 shrink-0 w-11">
-                  {isLocked ? (
-                    <div className="w-11 h-11 rounded-md bg-stone-100 dark:bg-white/5 flex items-center justify-center">
-                      <Lock className="w-4 h-4 text-stone-400 dark:text-stone-500" />
-                    </div>
-                  ) : user ? (
-                    <CircularProgress progress={pct} />
-                  ) : (
-                    <div className="w-11 h-11 rounded-md bg-stone-100 dark:bg-white/5 flex items-center justify-center">
-                      <span className="text-[11px] font-mono font-bold tabular-nums text-stone-500 dark:text-stone-400">
-                        {topicNum}
-                      </span>
-                    </div>
-                  )}
-                  {!isLocked && user && (
-                    <span className="text-[10px] font-mono uppercase tracking-widest text-stone-400 dark:text-stone-500">
-                      / {topicNum}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-sm font-bold tracking-tight text-stone-900 dark:text-stone-50 truncate">
-                      {topic.name}
-                    </h3>
-                    {isComplete && user && (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-lime-500 shrink-0" />
-                    )}
-                  </div>
-                  {user && !isLocked ? (
-                    <>
-                      <div className="w-full h-0.5 bg-stone-200 dark:bg-white/10 overflow-hidden mb-2">
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${pct}%` }}
-                          transition={{ duration: 0.6, delay: Math.min(idx, 10) * 0.03 }}
-                          className={`h-full ${isComplete ? "bg-lime-400" : pct > 0 ? "bg-stone-900 dark:bg-stone-50" : "bg-transparent"}`}
-                        />
-                      </div>
-                      <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500 dark:text-stone-400 tabular-nums">
-                        <span className="text-stone-900 dark:text-stone-50">{topic.solvedCount}</span>
-                        <span className="text-stone-400 dark:text-stone-600"> / {topic.problemCount} problems</span>
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500 dark:text-stone-400 tabular-nums">
-                      {topic.problemCount} problems
-                    </span>
-                  )}
-                </div>
-
-                <div className="shrink-0">
-                  {isLocked ? (
-                    <Lock className="w-4 h-4 text-stone-300 dark:text-stone-600" />
-                  ) : (
-                    <ArrowRight className="w-4 h-4 text-stone-400 dark:text-stone-500 group-hover:text-lime-600 dark:group-hover:text-lime-400 group-hover:translate-x-0.5 transition-all" />
-                  )}
-                </div>
-              </>
-            );
-
-            return (
-              <motion.div
-                key={topic.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: Math.min(idx, 10) * 0.03 }}
-              >
-                {isLocked ? (
-                  <button
-                    onClick={() => setShowGate(true)}
-                    className="group w-full flex items-center gap-3 sm:gap-4 bg-white dark:bg-stone-900 px-3 sm:px-5 py-3 sm:py-4 rounded-md border border-stone-200 dark:border-white/10 opacity-70 hover:opacity-100 hover:border-stone-400 dark:hover:border-white/25 transition-all text-left cursor-pointer"
-                  >
-                    {inner}
-                  </button>
-                ) : (
-                  <Link
-                    to={`/learn/dsa/${topic.slug}`}
-                    className="group flex items-center gap-3 sm:gap-4 bg-white dark:bg-stone-900 px-3 sm:px-5 py-3 sm:py-4 rounded-md border border-stone-200 dark:border-white/10 hover:border-stone-400 dark:hover:border-white/25 transition-colors no-underline"
-                  >
-                    {inner}
-                  </Link>
-                )}
-              </motion.div>
-            );
-          })}
+          {paginatedTopics?.map((topic, idx) => (
+            <DsaTopicCard
+              key={topic.id}
+              topic={topic}
+              idx={idx}
+              page={page}
+              user={user}
+              onShowGate={() => setShowGate(true)}
+            />
+          ))}
 
           {paginatedTopics?.length === 0 && (
             <div className="py-20 text-center border border-dashed border-stone-300 dark:border-white/10 rounded-md">
@@ -500,7 +523,6 @@ export default function DsaTopicsPage() {
       </div>
 
       <LoginGate open={showGate} onClose={() => setShowGate(false)} />
-      <LeetcodeImportModal open={showImport} onClose={() => setShowImport(false)} />
     </div>
   );
 }

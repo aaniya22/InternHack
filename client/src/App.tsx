@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, type ComponentType } from "react";
+import { lazy, Suspense, useEffect, type ComponentType, type LazyExoticComponent } from "react";
 import { Navigate, Route, Routes, useParams, useNavigate } from "react-router";
 import { useAuthStore } from "./lib/auth.store";
+import type { ProgramType } from "./module/student/opensource/OrgBrowserPage";
 import toast, { Toaster } from "./components/ui/toast";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -26,6 +27,8 @@ function lazyWithRetry(
     }),
   );
 }
+
+const ContributorsPage = lazyWithRetry(() => import("./module/contributors/ContributorsPage"));
 
 // Public pages
 const LandingPage = lazyWithRetry(
@@ -647,16 +650,12 @@ function YCCompanyOrRedirect() {
   return <YCCompanyDetailPage />;
 }
 
-function ApplyRedirect() {
-  const { jobId } = useParams();
-  return <Navigate to={`/student/jobs/${jobId}/apply`} replace />;
-}
-
 function ProfileRedirect() {
   const { id } = useParams();
   const { user } = useAuthStore();
-  const base = user?.role === "ADMIN" ? "/admin" : "/recruiters";
-  return <Navigate to={`${base}/profile/${id}`} replace />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role === "ADMIN") return <Navigate to={`/admin/profile/${id}`} replace />;
+  return <Navigate to={`/student/profile/public/${id}`} replace />;
 }
 
 /** Listens for 401 auth:expired events and redirects via React Router instead of window.location */
@@ -676,6 +675,8 @@ function AuthExpiredRedirect() {
 function App() {
   return (
     <>
+      <ScrollProgressBar />
+      <ScrollToTop />
       <AuthExpiredRedirect />
       <Toaster />
       <ErrorBoundary>

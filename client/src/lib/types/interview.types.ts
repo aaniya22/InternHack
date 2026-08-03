@@ -137,20 +137,79 @@ export interface InterviewCompanyListResponse {
 }
 
 // Mock Interview
-export interface MockInterviewTranscriptEntry {
-  question: string;
-  answer: string;
+export type PeerMockInterviewStatus = "PENDING_SCHEDULE" | "SCHEDULED" | "COMPLETED" | "CANCELLED";
+
+export interface PeerMockInterview {
+  id: number;
+  topic: string;
+  customTopic?: string | null;
+  studentAId: number | null;
+  studentBId: number | null;
+  assignedProblemId: number | null;
+  status: PeerMockInterviewStatus;
+  sharedAvailability: string[];
+  proposedTime: string | null;
+  proposedById: number | null;
+  scheduledAt: string | null;
+  schedulingConfirmed: boolean;
+  meetingLink: string | null;
+  ratingAForB: number | null;
+  feedbackAForB: string | null;
+  ratingBForA: number | null;
+  feedbackBForA: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  studentA: { id: number; name: string; email: string; college: string | null; linkedinUrl: string | null; contactNo: string | null } | null;
+  studentB: { id: number; name: string; email: string; college: string | null; linkedinUrl: string | null; contactNo: string | null } | null;
+  assignedProblem: { id: number; title: string; slug: string; difficulty: string } | null;
+  preparationMaterial?: MockInterviewPreparationMaterial | null;
 }
 
-export interface MockInterviewFeedback {
-  communication: string;
-  technicalAccuracy: string;
-  areasToImprove: string[];
-  strengths: string[];
-  overallRating: number;
+export interface MockInterviewPreparationMaterial {
+  type: string;
+  dsaProblem?: { id: number; title: string; slug: string; difficulty: string } | null;
+  generic?: {
+    prompt: string;
+    requirements?: string[];
+    objectives?: string[];
+    followUpQuestions?: string[];
+  };
+  /** True when the viewer is the interviewee for this round: the exact question list is withheld so the interview stays live. */
+  redacted?: boolean;
+  note?: string;
 }
 
-export interface MockInterviewFeedbackResponse {
-  feedback: MockInterviewFeedback;
-  fallbackUsed: boolean;
+// Live peer matching
+export type PeerMatchStrength = "STRONG" | "GOOD" | "FAIR";
+
+export interface PeerMatchCandidate {
+  userId: number;
+  name: string;
+  college: string | null;
+  profilePic: string | null;
+  matchPercent: number;
+  matchStrength: PeerMatchStrength;
+  customTopic?: string | null;
+  sharedAvailability: string[];
+  hasRoadmapMatch: boolean;
+  verifiedSkills: { skillName: string; score: number }[];
+}
+
+// Locked entries carry no identifying data; the server only sends an initial
+// and the strength band for the blurred premium-upsell cards.
+export interface PeerLockedMatch {
+  nameInitial: string;
+  matchStrength: PeerMatchStrength;
+}
+
+export interface PeerMatchListResponse {
+  optedIn: boolean;
+  activePairing: boolean;
+  tier: "FREE" | "PREMIUM";
+  topic?: string;
+  customTopic?: string | null;
+  matches: PeerMatchCandidate[];
+  lockedMatches: PeerLockedMatch[];
+  totalCandidates: number;
 }

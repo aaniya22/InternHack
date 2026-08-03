@@ -1,12 +1,26 @@
 import cron from "node-cron";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../database/db.js";
+import { withAdvisoryLock } from "../../utils/cron-lock.js";
+import { sendEmail } from "../../utils/email.utils.js";
+import {
+  newFundingSignalsEmailHtml,
+  newFundingSignalsImagePrompt,
+} from "../../utils/email-templates.js";
+import type { NewFundingSignalEmailItem } from "../../utils/email-templates.js";
 import { BaseSignalSource } from "./sources/base.source.js";
 import type { FundingSignalData } from "./sources/base.source.js";
 import { YcLaunchesSource } from "./sources/yc-launches.source.js";
 import { TechCrunchSource } from "./sources/techcrunch.source.js";
 import { HnHiringSource } from "./sources/hn-hiring.source.js";
 import { ExaFundingSource } from "./sources/exa-funding.source.js";
+
+const ADMIN_ALERT_EMAIL = process.env["ADMIN_ALERT_EMAIL"] ?? "";
+
+/** True when a signal carries real funding data and isn't a hiring-only post. */
+function isFundingSignal(source: string, s: FundingSignalData): boolean {
+  return source !== "hn-hiring" && Boolean(s.fundingAmount || s.amountUsd || s.fundingRound);
+}
 
 interface SignalsQuery {
   page: number;
@@ -15,10 +29,7 @@ interface SignalsQuery {
   source?: string | undefined;
   round?: string | undefined;
   industry?: string | undefined;
-  kind?: "funding" | "hiring" | "product_launch" | "all" | undefined;
   status?: "ACTIVE" | "STALE" | "ARCHIVED" | "ALL" | undefined;
-  hiringOnly?: boolean | undefined;
-  minAmountUsd?: bigint | undefined;
   sort?: "recent" | "amount" | undefined;
 }
 
@@ -78,7 +89,9 @@ export class SignalsService {
   startCron(schedule = "0 */6 * * *") {
     if (this.cronJob) this.cronJob.stop();
     this.cronJob = cron.schedule(schedule, () => {
-      void this.ingestAll();
+      void withAdvisoryLock("signals-ingestion", async () => {
+        await this.ingestAll();
+      });
     });
     console.log(`[Signals] Cron scheduled: ${schedule}`);
   }
@@ -89,6 +102,11 @@ export class SignalsService {
       this.cronJob = null;
       console.log("[Signals] Cron stopped");
     }
+  }
+
+  /** Run the ingest pass once (used by the Vercel daily cron endpoint). */
+  async runOnce() {
+    return this.ingestAll();
   }
 
   async ingestAll(): Promise<{
@@ -117,15 +135,28 @@ export class SignalsService {
       error?: string | undefined;
       duration: number;
     }> = [];
+    const allNewFundingSignals: NewFundingSignalEmailItem[] = [];
 
     for (const src of this.sources) {
       const startTime = Date.now();
+      const controller = new AbortController();
+      const abortTimeoutId = setTimeout(() => controller.abort(), SOURCE_TIMEOUT);
+      let raceTimeoutId = undefined as NodeJS.Timeout | undefined;
+      const raceTimeout = new Promise<never>((_r, reject) => {
+        raceTimeoutId = setTimeout(() => reject(new Error("Source timeout exceeded")), SOURCE_TIMEOUT);
+      });
       try {
-        const timeoutPromise = new Promise<never>((_r, reject) =>
-          setTimeout(() => reject(new Error("Source timeout exceeded")), SOURCE_TIMEOUT),
+        const result = await Promise.race([
+          src.fetch(controller.signal),
+          raceTimeout,
+        ]);
+        clearTimeout(abortTimeoutId);
+        if (raceTimeoutId) clearTimeout(raceTimeoutId);
+        const { created, updated, newFundingSignals } = await this.upsertSignals(
+          result.source,
+          result.signals,
         );
-        const result = await Promise.race([src.fetch(), timeoutPromise]);
-        const { created, updated } = await this.upsertSignals(result.source, result.signals);
+        allNewFundingSignals.push(...newFundingSignals);
         const duration = Date.now() - startTime;
 
         results.push({
@@ -153,6 +184,8 @@ export class SignalsService {
           `[Signals] ${result.source}: found=${String(result.signals.length)}, created=${String(created)}, updated=${String(updated)}, duration=${String(duration)}ms`,
         );
       } catch (err) {
+        clearTimeout(abortTimeoutId);
+        if (raceTimeoutId) clearTimeout(raceTimeoutId);
         const duration = Date.now() - startTime;
         const message = err instanceof Error ? err.message : "Unknown error";
         results.push({
@@ -182,18 +215,31 @@ export class SignalsService {
       await this.markStaleSignals();
     } catch (err) {
       console.error("[Signals] Failed to mark stale signals:", err);
-    } finally {
-      this.isRunning = false;
-      console.log("[Signals] Ingest run completed");
     }
+
+    if (allNewFundingSignals.length > 0 && ADMIN_ALERT_EMAIL) {
+      try {
+        await sendEmail({
+          to: ADMIN_ALERT_EMAIL,
+          subject: `Social image prompt: ${allNewFundingSignals.length} new funding signal${allNewFundingSignals.length === 1 ? "" : "s"}`,
+          html: newFundingSignalsEmailHtml(allNewFundingSignals),
+          text: newFundingSignalsImagePrompt(allNewFundingSignals),
+        });
+      } catch (err) {
+        console.error("[Signals] Failed to send new-funding-signals alert email:", err);
+      }
+    }
+
+    this.isRunning = false;
+    console.log("[Signals] Ingest run completed");
     return { results };
   }
 
   private async upsertSignals(
     source: string,
     signals: FundingSignalData[],
-  ): Promise<{ created: number; updated: number }> {
-    if (signals.length === 0) return { created: 0, updated: 0 };
+  ): Promise<{ created: number; updated: number; newFundingSignals: NewFundingSignalEmailItem[] }> {
+    if (signals.length === 0) return { created: 0, updated: 0, newFundingSignals: [] };
 
     const dedupedMap = new Map<string, FundingSignalData>();
     for (const s of signals) dedupedMap.set(s.sourceId, s);
@@ -206,8 +252,35 @@ export class SignalsService {
     });
     const existingMap = new Map(existing.map((e) => [e.sourceId, e.id]));
 
+    // Cross-source dedup: one row per normalized (company, round). News outlets
+    // report the same raise many times, so without this every article would
+    // become its own card. Look up any existing row matching this batch's
+    // companies (one batched query) and update it instead of inserting a twin.
+    const normKey = (name: string, round?: string | null) =>
+      `${name.trim().toLowerCase()}|${(round ?? "").trim().toLowerCase()}`;
+    const normNames = [...new Set(uniqueSignals.map((s) => s.companyName.trim().toLowerCase()))];
+    const normRows = await prisma.$queryRaw<
+      { id: number; c: string; r: string; status: string }[]
+    >`
+      SELECT id, lower(btrim("companyName")) AS c, coalesce(lower(btrim("fundingRound")), '') AS r, status::text AS status
+      FROM "fundingSignal"
+      WHERE lower(btrim("companyName")) = ANY(${normNames})`;
+    // Keep the best existing row per normKey: prefer ACTIVE, then lowest id.
+    const normMap = new Map<string, number>();
+    for (const row of normRows) {
+      const key = `${row.c}|${row.r}`;
+      const current = normMap.get(key);
+      if (current === undefined) {
+        normMap.set(key, row.id);
+      } else if (row.status === "ACTIVE" && row.id < current) {
+        normMap.set(key, row.id);
+      }
+    }
+    const seenNormKeys = new Set<string>();
+
     let created = 0;
     let updated = 0;
+    const newFundingSignals: NewFundingSignalEmailItem[] = [];
 
     const BATCH_SIZE = 15;
     for (let i = 0; i < uniqueSignals.length; i += BATCH_SIZE) {
@@ -216,6 +289,25 @@ export class SignalsService {
 
       for (const s of batch) {
         const existingId = existingMap.get(s.sourceId);
+        const key = normKey(s.companyName, s.fundingRound);
+        // Same (company, round) already handled this run, or present under a
+        // different source: refresh the canonical row, never insert a duplicate.
+        if (existingId === undefined) {
+          if (seenNormKeys.has(key)) continue;
+          const twinId = normMap.get(key);
+          if (twinId !== undefined) {
+            ops.push(
+              prisma.fundingSignal.update({
+                where: { id: twinId },
+                data: { status: "ACTIVE", lastSeenAt: new Date() },
+              }),
+            );
+            updated++;
+            seenNormKeys.add(key);
+            continue;
+          }
+        }
+        seenNormKeys.add(key);
         const data = {
           companyName: s.companyName,
           companyWebsite: s.companyWebsite ?? null,
@@ -246,15 +338,30 @@ export class SignalsService {
         } else {
           ops.push(
             prisma.fundingSignal.create({
-              data: { ...data, source, sourceId: s.sourceId, status: "ACTIVE" },
+              data: { ...data, source, sourceId: s.sourceId, status: "ACTIVE", lastSeenAt: new Date() },
             }),
           );
           created++;
+          if (isFundingSignal(source, s)) {
+            newFundingSignals.push({
+              companyName: s.companyName,
+              companyWebsite: s.companyWebsite ?? null,
+              fundingRound: s.fundingRound ?? null,
+              fundingAmount: s.fundingAmount ?? null,
+              amountUsd: s.amountUsd ?? null,
+              industry: s.industry ?? null,
+              hqLocation: s.hqLocation ?? null,
+              investors: s.investors ?? [],
+              sourceUrl: s.sourceUrl,
+              source,
+              announcedAt: s.announcedAt,
+            });
+          }
         }
       }
       await Promise.all(ops);
     }
-    return { created, updated };
+    return { created, updated, newFundingSignals };
   }
 
   /** Mark signals not seen in 14 days as STALE */
@@ -281,35 +388,6 @@ export class SignalsService {
     if (query.source) where.source = query.source;
     if (query.round) where.fundingRound = { contains: query.round, mode: "insensitive" };
     if (query.industry) where.industry = { contains: query.industry, mode: "insensitive" };
-    if (query.hiringOnly) where.hiringSignal = true;
-    if (query.minAmountUsd !== undefined) where.amountUsd = { gte: query.minAmountUsd };
-
-    // kind=funding: rows that carry funding data (amount or round)
-    // kind=hiring: hiring-only signals (HN posts etc.) with no funding info
-    if (query.kind === "funding") {
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-        {
-          OR: [
-            { fundingAmount: { not: null } },
-            { amountUsd: { not: null } },
-            { fundingRound: { not: null } },
-          ],
-        },
-        { source: { not: "hn-hiring" } },
-      ];
-    } else if (query.kind === "hiring") {
-      where.hiringSignal = true;
-      where.fundingAmount = null;
-      where.amountUsd = null;
-    } else if (query.kind === "product_launch") {
-      // Product launch: YC launches that are not pure funding rounds and not hiring-only
-      where.source = "yc-launches";
-      where.hiringSignal = false;
-      where.fundingAmount = null;
-      where.amountUsd = null;
-      where.fundingRound = null;
-    }
 
     const orderBy: Prisma.fundingSignalOrderByWithRelationInput =
       query.sort === "amount" ? { amountUsd: "desc" } : { announcedAt: "desc" };
@@ -383,6 +461,7 @@ export class SignalsService {
         careersUrl: input.careersUrl ?? null,
         hiringSignal: input.hiringSignal ?? false,
         status: "ACTIVE",
+        lastSeenAt: new Date(),
       },
     });
     return { ...row, amountUsd: row.amountUsd?.toString() ?? null };

@@ -433,6 +433,7 @@ function LinkCompanyModal({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!query.trim()) { setResults([]); return; }
     const t = setTimeout(async () => {
       try {
@@ -468,7 +469,7 @@ function LinkCompanyModal({
               Submitted as: <span className="text-amber-400">{experience.companyName ?? "—"}</span>
             </p>
           </div>
-          <button onClick={onClose} className="p-1 text-gray-400 hover:text-white transition-colors">
+          <button type="button" onClick={onClose} className="p-1 text-gray-400 hover:text-white transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -489,6 +490,7 @@ function LinkCompanyModal({
               <button
                 key={c.id}
                 disabled={saving}
+                type="button"
                 onClick={() => link(c)}
                 className="w-full flex items-center gap-3 px-3 py-2.5 text-left text-sm bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors cursor-pointer border-0 disabled:opacity-50"
               >

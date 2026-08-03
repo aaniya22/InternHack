@@ -5,23 +5,29 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ExternalLink, CheckCircle2, Circle,
   Bookmark, BookmarkCheck, ChevronDown,
-  Building2, BarChart3, Lightbulb, StickyNote, Link2, ArrowUpRight,
-  History, Terminal, Lock, Crown, Code2,
+  Building2, BarChart3, Lightbulb, Link2, ArrowUpRight,
+  History, Terminal, Lock, Crown, ChevronLeft, ChevronRight, Play, Flag, X,
 } from "lucide-react";
+import type { SolutionStep } from "../../../lib/types";
 import toast from "@/components/ui/toast";
 import api from "../../../lib/axios";
 import { queryKeys } from "../../../lib/query-keys";
-import type { DsaProblemDetail, DsaLanguage, DsaExecutionResult, DsaSubmissionSummary } from "../../../lib/types";
+import type { DsaProblemDetail, DsaLanguage, DsaExecutionResult, DsaSubmissionSummary, DsaSimilarProblem, DsaRunTestCase, UsageStats } from "../../../lib/types";
+import { warmDsaRuntime, runTestCasesInBrowser } from "./lib/dsa-runner";
 import { useAuthStore } from "../../../lib/auth.store";
 import { SEO } from "../../../components/SEO";
 import { canonicalUrl, SITE_URL } from "../../../lib/seo.utils";
 import { breadcrumbSchema } from "../../../lib/structured-data";
 import { LoadingScreen } from "../../../components/LoadingScreen";
+import { cleanHint } from "../../../lib/sanitize";
+import { SafeHtml } from "../../../components/common/SafeHtml";
 import { DsaCodeEditor } from "./components/DsaCodeEditor";
 import { DsaTestResults } from "./components/DsaTestResults";
 import { DsaSubmissionHistory } from "./components/DsaSubmissionHistory";
 import { DsaConsoleOutput } from "./components/DsaConsoleOutput";
 import { Button } from "@/components/ui/button";
+import { DsaApproachesPanel } from "./components/DsaApproachesPanel";
+import { NotesPanel } from "../../../components/learning/NotesPanel";
 
 const DIFF_STYLE: Record<string, string> = {
   Easy: "text-green-700 dark:text-green-400 border-green-300 dark:border-green-900/60",
@@ -42,39 +48,15 @@ class Solution:
 # --- Do not modify below ---
 Solution().solve()
 `,
-  cpp: `#include <bits/stdc++.h>
-using namespace std;
+  javascript: `function solve() {
+  // Read input line-by-line with readLine(), or the whole thing via the
+  // \`input\` string. Print your answer with console.log.
+  // Example: const n = parseInt(readLine()); const arr = readLine().split(" ").map(Number);
 
-class Solution {
-public:
-    void solve() {
-        // Read input from stdin
-        // Example: int n; cin >> n;
-
-    }
-};
+}
 
 // --- Do not modify below ---
-int main() {
-    Solution().solve();
-    return 0;
-}
-`,
-  java: `import java.util.*;
-
-public class Main {
-    public void solve() {
-        Scanner sc = new Scanner(System.in);
-        // Read input from stdin
-        // Example: int n = sc.nextInt();
-
-    }
-
-    // --- Do not modify below ---
-    public static void main(String[] args) {
-        new Main().solve();
-    }
-}
+solve();
 `,
 };
 
@@ -106,21 +88,22 @@ export default function DsaProblemDetailPage() {
 
   const [showAllCompanies, setShowAllCompanies] = useState(false);
   const [expandedHint, setExpandedHint] = useState<number | null>(null);
-  const [showNotes, setShowNotes] = useState(false);
-  const [noteValue, setNoteValue] = useState("");
+  const [showNextPanel, setShowNextPanel] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportMessage, setReportMessage] = useState("");
 
   const [activeTab, setActiveTab] = useState<"problem" | "code">("problem");
   const [rightTab, setRightTab] = useState<"results" | "history" | "output">("results");
   const [language, setLanguage] = useState<DsaLanguage>("python");
   const [codeMap, setCodeMap] = useState<Record<DsaLanguage, string>>({
     python: DEFAULT_CODE.python,
-    cpp: DEFAULT_CODE.cpp,
-    java: DEFAULT_CODE.java,
+    javascript: DEFAULT_CODE.javascript,
   });
 
   useEffect(() => {
     if (!slug) return;
-    for (const lang of ["python", "cpp", "java"] as DsaLanguage[]) {
+    for (const lang of ["python", "javascript"] as DsaLanguage[]) {
       const saved = localStorage.getItem(`dsa-code-${slug}-${lang}`);
       // eslint-disable-next-line react-hooks/set-state-in-effect
       if (saved) setCodeMap((prev) => ({ ...prev, [lang]: saved }));
@@ -130,16 +113,17 @@ export default function DsaProblemDetailPage() {
   const handleCodeChange = useCallback((val: string) => {
     setCodeMap((prev) => ({ ...prev, [language]: val }));
     if (slug) {
-      try { localStorage.setItem(`dsa-code-${slug}-${language}`, val); } catch { /* quota */ }
+      try { localStorage.setItem(`dsa-code-${slug}-${language}`, val); } catch { console.warn("localStorage quota exceeded for dsa-code"); }
     }
   }, [language, slug]);
 
   const handleLoadSubmission = useCallback((code: string, lang: DsaLanguage) => {
+    if (!(lang in DEFAULT_CODE)) return; // old submissions may use retired languages (cpp/java)
     setLanguage(lang);
     setCodeMap((prev) => ({ ...prev, [lang]: code }));
     setRightTab("results");
     if (slug) {
-      try { localStorage.setItem(`dsa-code-${slug}-${lang}`, code); } catch { /* quota */ }
+      try { localStorage.setItem(`dsa-code-${slug}-${lang}`, code); } catch { console.warn("localStorage quota exceeded for dsa-code"); }
     }
   }, [slug]);
 
@@ -157,6 +141,41 @@ export default function DsaProblemDetailPage() {
     staleTime: 60 * 1000,
   });
 
+  const { data: similarProblems = [] } = useQuery({
+    queryKey: queryKeys.dsa.similar(problem?.id ?? 0),
+    queryFn: () =>
+      api.get<DsaSimilarProblem[]>(`/dsa/problems/${problem!.id}/similar?limit=3`)
+        .then((r) => r.data),
+    enabled: !!problem && showNextPanel,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Test cases (stdin/label only — expected output withheld until submission)
+  const { data: testCases } = useQuery({
+    queryKey: queryKeys.dsa.testCases(problem?.id ?? 0),
+    queryFn: () =>
+      api.get<{ testCases: DsaRunTestCase[] }>(`/dsa/problems/${problem!.id}/testcases`)
+        .then((r) => r.data.testCases),
+    enabled: !!user && !!problem,
+    staleTime: 60 * 60 * 1000,
+  });
+
+  // Daily run count — code executes for free in the browser, this just reflects the shared cap
+  const { data: usageData } = useQuery<UsageStats>({
+    queryKey: queryKeys.ats.usage(),
+    queryFn: () => api.get("/ats/usage").then((r) => r.data),
+    enabled: !!user,
+    staleTime: 30 * 1000,
+  });
+  const dsaUsage = usageData?.usage.find((u) => u.action === "DSA_EXECUTE");
+
+  useEffect(() => {
+    if (user) warmDsaRuntime(language);
+  }, [user, language]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setShowNextPanel(false); }, [slug]);
+
   const toggleMutation = useMutation({
     mutationFn: (problemId: number) => api.post(`/dsa/problems/${problemId}/toggle`).then((r) => r.data),
     onSuccess: () => {
@@ -172,26 +191,57 @@ export default function DsaProblemDetailPage() {
     onError: () => toast.error("Failed to bookmark"),
   });
 
-  const notesMutation = useMutation({
-    mutationFn: ({ problemId, notes }: { problemId: number; notes: string }) =>
-      api.put(`/dsa/problems/${problemId}/notes`, { notes }).then((r) => r.data),
+  // Report issue mutation
+  const reportIssueMutation = useMutation({
+    mutationFn: ({
+      problemId,
+      reason,
+      message,
+    }: {
+      problemId: number;
+      reason: string;
+      message: string;
+    }) =>
+      api.post(`/dsa/problems/${problemId}/report`, {
+        reason,
+        message,
+      }),
+
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.dsa.problem(slug!) });
-      toast.success("Notes saved");
+      toast.success("Issue reported successfully");
+
+      setShowReportModal(false);
+      setReportReason("");
+      setReportMessage("");
+    },
+
+    onError: () => {
+      toast.error("Failed to report issue");
     },
   });
 
   const executeMutation = useMutation({
-    mutationFn: ({ problemId, lang, code }: { problemId: number; lang: string; code: string }) =>
-      api.post<DsaExecutionResult>(`/dsa/problems/${problemId}/execute`, { language: lang, code }).then((r) => r.data),
+    mutationFn: async ({ problemId, lang, code }: { problemId: number; lang: DsaLanguage; code: string }) => {
+      let cases: DsaRunTestCase[];
+      if (testCases) {
+        cases = testCases;
+      } else {
+        const res = await api.get<{ testCases: DsaRunTestCase[] }>(`/dsa/problems/${problemId}/testcases`);
+        cases = res.data.testCases;
+      }
+      const results = await runTestCasesInBrowser(lang, code, cases);
+      return api.post<DsaExecutionResult>(`/dsa/problems/${problemId}/execute`, { language: lang, code, results }).then((r) => r.data);
+    },
     onSuccess: (data) => {
       setRightTab("results");
       if (data.allPassed) {
         toast.success("All test cases passed!");
         queryClient.invalidateQueries({ queryKey: queryKeys.dsa.problem(slug!) });
         queryClient.invalidateQueries({ queryKey: queryKeys.dsa.progress() });
+        setShowNextPanel(true);
       }
       queryClient.invalidateQueries({ queryKey: queryKeys.dsa.submissions(problem!.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.ats.usage() });
     },
     onError: (err: { response?: { status?: number; data?: { message?: string } } }) => {
       if (err?.response?.status === 429) {
@@ -203,9 +253,9 @@ export default function DsaProblemDetailPage() {
   });
 
   const handleRun = useCallback(() => {
-    if (!problem || !user || !isPremium) return;
+    if (!problem || !user) return;
     executeMutation.mutate({ problemId: problem.id, lang: language, code: codeMap[language] });
-  }, [problem, user, isPremium, language, codeMap, executeMutation]);
+  }, [problem, user, language, codeMap, executeMutation]);
 
   if (isLoading) return <LoadingScreen />;
   if (!problem) {
@@ -283,6 +333,9 @@ export default function DsaProblemDetailPage() {
                     }`}
                 >
                   {problem.bookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+                </button>
+                <button type="button" onClick={() => setShowReportModal(true)} title="Report issue" className="w-9 h-9 inline-flex items-center justify-center border rounded-md transition-colors text-stone-500 border-stone-200 dark:border-white/10 hover:border-stone-400 dark:hover:border-white/30">
+                    <Flag className="w-4 h-4" />
                 </button>
               </>
             )}
@@ -398,9 +451,10 @@ export default function DsaProblemDetailPage() {
                 <div>
                   <SectionLabel>description</SectionLabel>
                   <div className="mt-2 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md p-4">
-                    <div
+                    <SafeHtml
                       className="prose dark:prose-invert max-w-none text-sm text-stone-700 dark:text-stone-300 leading-relaxed whitespace-pre-wrap"
-                      dangerouslySetInnerHTML={{ __html: formatDescription(problem.description) }}
+                      html={formatDescription(problem.description)}
+                      method="sanitize-html"
                     />
                   </div>
                 </div>
@@ -418,9 +472,10 @@ export default function DsaProblemDetailPage() {
                 <div>
                   <SectionLabel>constraints</SectionLabel>
                   <div className="mt-2 bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md p-4">
-                    <div
+                    <SafeHtml
                       className="text-sm text-stone-700 dark:text-stone-300 whitespace-pre-wrap leading-relaxed"
-                      dangerouslySetInnerHTML={{ __html: formatDescription(problem.constraints) }}
+                      html={formatDescription(problem.constraints)}
+                      method="sanitize-html"
                     />
                   </div>
                 </div>
@@ -462,9 +517,10 @@ export default function DsaProblemDetailPage() {
                               transition={{ duration: 0.2 }}
                               className="overflow-hidden"
                             >
-                              <div
+                              <SafeHtml
                                 className="px-4 pb-4 pl-11 text-sm text-stone-700 dark:text-stone-300 leading-relaxed"
-                                dangerouslySetInnerHTML={{ __html: cleanHint(hint) }}
+                                html={cleanHint(hint)}
+                                method="sanitize-html"
                               />
                             </motion.div>
                           )}
@@ -475,59 +531,27 @@ export default function DsaProblemDetailPage() {
                 </div>
               )}
 
+              {/* Approaches */}
+              <DsaApproachesPanel slug={problem.slug} />
+
               {/* Notes */}
               {user && (
+                <NotesPanel contentType="DSA_PROBLEM" contentId={problem.id} />
+              )}
+              {/* Solution Walkthrough */}
+              {problem.solutionSteps && problem.solutionSteps.length > 0 && (
                 <div>
-                  <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md overflow-hidden">
-                    <button
-                      onClick={() => {
-                        setShowNotes(!showNotes);
-                        if (!showNotes) setNoteValue(problem.notes ?? "");
-                      }}
-                      className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-stone-50 dark:hover:bg-stone-800/40 transition-colors"
-                    >
-                      <span className="inline-flex items-center gap-2 text-[11px] font-mono uppercase tracking-widest text-stone-600 dark:text-stone-400">
-                        <StickyNote className="w-3 h-3 text-stone-500" /> my notes
-                        {problem.notes && !showNotes && <span className="h-1 w-1 bg-lime-400" />}
-                      </span>
-                      <ChevronDown
-                        className={`w-3.5 h-3.5 text-stone-400 transition-transform duration-200 ${showNotes ? "rotate-180" : ""
-                          }`}
-                      />
-                    </button>
-                    <AnimatePresence>
-                      {showNotes && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="px-4 pb-4">
-                            <textarea
-                              value={noteValue}
-                              onChange={(e) => setNoteValue(e.target.value)}
-                              className="w-full h-28 p-3 border border-stone-200 dark:border-white/10 rounded-md bg-white dark:bg-stone-950 text-sm text-stone-900 dark:text-stone-50 placeholder-stone-400 dark:placeholder-stone-600 resize-none focus:outline-none focus:border-lime-400 transition-colors"
-                              placeholder="Write your approach, key observations..."
-                            />
-                            <div className="flex justify-end mt-2">
-                              <button
-                                onClick={() => notesMutation.mutate({ problemId: problem.id, notes: noteValue })}
-                                disabled={notesMutation.isPending}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest bg-stone-900 dark:bg-stone-50 border border-stone-900 dark:border-stone-50 text-stone-50 dark:text-stone-900 rounded-md hover:bg-lime-400 hover:border-lime-400 hover:text-stone-900 dark:hover:text-stone-900 transition-colors disabled:opacity-50"
-                              >
-                                {notesMutation.isPending ? "saving" : "save"}
-                              </button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                  <SectionLabel dot="bg-lime-400">
+                    <Play className="w-3 h-3" /> solution walkthrough
+                  </SectionLabel>
+                  <div className="mt-2">
+                    <SolutionWalkthrough
+                      steps={problem.solutionSteps}
+                      code={problem.solutionCode}
+                    />
                   </div>
                 </div>
               )}
-
               {/* Similar questions */}
               {problem.similarQuestions && problem.similarQuestions.length > 0 && (
                 <div>
@@ -575,10 +599,10 @@ export default function DsaProblemDetailPage() {
             className={`flex flex-col min-h-0 bg-stone-50 dark:bg-stone-900/50 pb-16 lg:pb-0 ${activeTab !== "code" ? "hidden lg:flex" : "flex"
               }`}
           >
-            {isPremium ? (
+            {user ? (
               <>
                 {/* Editor */}
-                <div className="h-[55%] max-lg:h-screen-minus-180 min-h-0 border-b border-stone-200 dark:border-white/10">
+                <div className="h-[55%] max-lg:h-screen-minus-180 min-h-0 border-b border-stone-200 dark:border-white/10 relative overflow-hidden">
                   <DsaCodeEditor
                     value={codeMap[language]}
                     onChange={handleCodeChange}
@@ -586,6 +610,8 @@ export default function DsaProblemDetailPage() {
                     language={language}
                     onLanguageChange={setLanguage}
                     isRunning={executeMutation.isPending}
+                    runsUsed={dsaUsage?.used}
+                    runsLimit={dsaUsage?.limit}
                   />
                 </div>
 
@@ -624,8 +650,46 @@ export default function DsaProblemDetailPage() {
                       <DsaTestResults result={executeMutation.data ?? null} isRunning={executeMutation.isPending} />
                     ) : rightTab === "output" ? (
                       <DsaConsoleOutput result={executeMutation.data ?? null} isRunning={executeMutation.isPending} />
+                    ) : rightTab === "history" ? (
+                      isPremium ? (
+                        <DsaSubmissionHistory submissions={submissions ?? []} onLoadCode={handleLoadSubmission} />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-white dark:bg-stone-950">
+                          <div className="w-12 h-12 rounded-md bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-white/10 flex items-center justify-center mb-4">
+                            <Lock className="w-5 h-5 text-amber-500" />
+                          </div>
+                          <h3 className="text-base font-bold text-stone-900 dark:text-stone-50">History Tracking Locked</h3>
+                          <p className="mt-2 text-xs text-stone-600 dark:text-stone-400 max-w-[240px] leading-relaxed">
+                            Upgrade to track your submission history and review past solutions over time.
+                          </p>
+                          <Link
+                            to="/student/checkout"
+                            className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-stone-900 dark:bg-stone-50 text-stone-50 dark:text-stone-900 rounded-md text-[10px] font-mono uppercase tracking-widest hover:bg-lime-400 hover:text-stone-900 transition-colors no-underline"
+                          >
+                            <Crown className="w-3.5 h-3.5" /> Upgrade Now
+                          </Link>
+                        </div>
+                      )
                     ) : (
-                      <DsaSubmissionHistory submissions={submissions ?? []} onLoadCode={handleLoadSubmission} />
+                      isPremium ? (
+                        <DsaSubmissionHistory submissions={submissions ?? []} onLoadCode={handleLoadSubmission} />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-white dark:bg-stone-950">
+                          <div className="w-12 h-12 rounded-md bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-white/10 flex items-center justify-center mb-4">
+                            <Lock className="w-5 h-5 text-amber-500" />
+                          </div>
+                          <h3 className="text-base font-bold text-stone-900 dark:text-stone-50">History Tracking Locked</h3>
+                          <p className="mt-2 text-xs text-stone-600 dark:text-stone-400 max-w-[240px] leading-relaxed">
+                            Upgrade to track your submission history and review past solutions over time.
+                          </p>
+                          <Link
+                            to="/student/checkout"
+                            className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-stone-900 dark:bg-stone-50 text-stone-50 dark:text-stone-900 rounded-md text-[10px] font-mono uppercase tracking-widest hover:bg-lime-400 hover:text-stone-900 transition-colors no-underline"
+                          >
+                            <Crown className="w-3.5 h-3.5" /> Upgrade Now
+                          </Link>
+                        </div>
+                      )
                     )}
                   </div>
                 </div>
@@ -651,89 +715,268 @@ export default function DsaProblemDetailPage() {
                   </Button>
                 </div>
               </>
-            ) : (
-              /* ── Premium lock overlay with blurred editor bg ── */
-              <div className="relative flex-1 min-h-0 overflow-hidden">
-                <div className="absolute inset-0 blur-sm opacity-60 pointer-events-none select-none">
-                  <div className="h-full bg-stone-950 p-4 font-mono text-xs leading-relaxed text-stone-400">
-                    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-stone-800">
-                      <span className="px-2 py-1 bg-stone-800 rounded-md text-stone-300 text-xs">Python 3</span>
-                      <span className="ml-auto px-3 py-1 bg-lime-400 rounded-md text-stone-950 text-xs font-bold">Run</span>
+              ) : (
+                /* ── Signed out lock ── */
+                <div className="relative flex-1 min-h-0 flex items-center justify-center bg-stone-950/10 backdrop-blur-xs">
+                  <div className="text-center max-w-sm px-6 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md p-8">
+                    <div className="w-12 h-12 rounded-md bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-white/10 flex items-center justify-center mx-auto mb-4">
+                      <Lock className="w-5 h-5 text-stone-400" />
                     </div>
-                    <p><span className="text-purple-400">import</span> sys</p>
-                    <p><span className="text-purple-400">from</span> typing <span className="text-purple-400">import</span> List</p>
-                    <p className="mt-2"><span className="text-blue-400">class</span> <span className="text-yellow-300">Solution</span>:</p>
-                    <p className="pl-6"><span className="text-blue-400">def</span> <span className="text-lime-300">solve</span>(self):</p>
-                    <p className="pl-12 text-stone-500"># Read input from stdin</p>
-                    <p className="pl-12"><span className="text-stone-500">n = </span><span className="text-blue-300">int</span>(<span className="text-blue-300">input</span>())</p>
-                    <p className="pl-12"><span className="text-stone-500">arr = </span><span className="text-blue-300">list</span>(<span className="text-blue-300">map</span>(<span className="text-blue-300">int</span>, <span className="text-blue-300">input</span>().split()))</p>
-                    <p className="mt-2 pl-12 text-stone-500"># Write your solution here</p>
-                    <p className="pl-12"><span className="text-blue-300">print</span>(result)</p>
-                    <p className="mt-4 text-stone-600"># --- Do not modify below ---</p>
-                    <p><span className="text-yellow-300">Solution</span>().solve()</p>
-                    <div className="mt-6 pt-3 border-t border-stone-800">
-                      <p className="text-stone-500">Test Results</p>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="h-2 w-2 bg-lime-500/60" />
-                        <span>Test Case 1: Passed</span>
-                      </div>
-                      <div className="mt-1 flex items-center gap-2">
-                        <span className="h-2 w-2 bg-lime-500/60" />
-                        <span>Test Case 2: Passed</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Lock overlay */}
-                <div className="absolute inset-0 flex items-center justify-center bg-stone-950/50 backdrop-blur-xs z-10">
-                  <div className="text-center max-w-sm px-6 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md p-6">
-                    <div className="w-12 h-12 rounded-md bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-white/10 flex items-center justify-center mx-auto mb-4">
-                      <Lock className="w-5 h-5 text-amber-500" />
-                    </div>
-                    <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">
-                      <span className="h-1 w-1 bg-lime-400" />
-                      {user ? "premium required" : "sign in required"}
-                    </div>
-                    <h3 className="text-xl font-bold tracking-tight text-stone-900 dark:text-stone-50 mb-2">
-                      {user ? "Upgrade to run code." : "Sign in to continue."}
+                    <SectionLabel dot="bg-stone-300">Sign in required</SectionLabel>
+                    <h3 className="text-xl font-bold tracking-tight text-stone-900 dark:text-stone-50 mt-2 mb-2">
+                      Sign in to continue.
                     </h3>
-                    <p className="text-sm text-stone-600 dark:text-stone-400 mb-5 leading-relaxed">
-                      {user
-                        ? "Run code, test solutions against test cases, and track your submission history."
-                        : "Sign in and upgrade to Premium to access the built-in code editor."}
+                    <p className="text-sm text-stone-600 dark:text-stone-400 mb-6 font-mono leading-tight">
+                      Access the code editor, test benchmarks, and track your history by signing in.
                     </p>
-                    {user ? (
-                      <Link
-                        to="/student/checkout"
-                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-stone-900 dark:bg-stone-50 border border-stone-900 dark:border-stone-50 text-stone-50 dark:text-stone-900 rounded-md text-xs font-mono uppercase tracking-widest hover:bg-lime-400 hover:border-lime-400 hover:text-stone-900 dark:hover:text-stone-900 transition-colors no-underline"
-                      >
-                        <Crown className="w-3.5 h-3.5" /> upgrade now
-                      </Link>
-                    ) : (
-                      <Link
-                        to="/login"
-                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-stone-900 dark:bg-stone-50 border border-stone-900 dark:border-stone-50 text-stone-50 dark:text-stone-900 rounded-md text-xs font-mono uppercase tracking-widest hover:bg-lime-400 hover:border-lime-400 hover:text-stone-900 dark:hover:text-stone-900 transition-colors no-underline"
-                      >
-                        sign in
-                      </Link>
-                    )}
-                    <div className="mt-4 flex items-center justify-center gap-4 text-[10px] font-mono uppercase tracking-widest text-stone-500">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Code2 className="w-3 h-3" /> python / cpp / java
-                      </span>
-                      <span className="inline-flex items-center gap-1.5">
-                        <Terminal className="w-3 h-3" /> 50 runs/day
-                      </span>
-                    </div>
+                    <Link
+                      to="/login"
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-stone-900 dark:bg-stone-50 border border-stone-900 dark:border-stone-50 text-stone-50 dark:text-stone-900 rounded-md text-xs font-mono uppercase tracking-widest hover:bg-lime-400 hover:text-stone-900 transition-colors no-underline"
+                    >
+                      sign in
+                    </Link>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
           </div>
         </div>
       </div>
+      {/* ── Report Issue Modal ── */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md p-5">
+            <h2 className="text-sm font-bold uppercase tracking-widest mb-4">
+              Report Issue
+            </h2>
+            <div className="space-y-4">
+              <select
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                className="w-full px-3 py-2 border border-stone-200 dark:border-white/10 rounded-md bg-white dark:bg-stone-950 text-sm"
+              >
+                <option value="">Select a reason</option>
+                <option value="Wrong test case">Wrong test case</option>
+                <option value="Unclear statement">Unclear statement</option>
+                <option value="Broken editor">Broken editor</option>
+                <option value="Other">Other</option>
+              </select>
+              <textarea
+                value={reportMessage}
+                onChange={(e) => setReportMessage(e.target.value)}
+                placeholder="Additional details (optional)"
+                className="w-full h-28 px-3 py-2 border border-stone-200 dark:border-white/10 rounded-md bg-white dark:bg-stone-950 text-sm resize-none"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowReportModal(false)}
+                  className="px-3 py-2 text-xs font-mono uppercase border border-stone-300 dark:border-white/10 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={!reportReason || reportIssueMutation.isPending}
+                  onClick={() =>
+                    reportIssueMutation.mutate({
+                      problemId: problem.id,
+                      reason: reportReason,
+                      message: reportMessage,
+                    })
+                  }
+                  className="px-3 py-2 text-xs font-mono uppercase bg-stone-900 dark:bg-stone-50 text-stone-50 dark:text-stone-900 rounded-md disabled:opacity-50"
+                >
+                  {reportIssueMutation.isPending ? "Submitting" : "Submit"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── "Try Next" slide-up panel ── */}
+      <AnimatePresence>
+        {showNextPanel && isPremium && similarProblems.length > 0 && (
+          <motion.div
+            initial={{ y: "100%", opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: "100%", opacity: 0 }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-stone-900 border-t border-stone-200 dark:border-white/10 shadow-2xl"
+          >
+            <div className="max-w-5xl mx-auto px-4 py-4 pb-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-stone-500">
+                  <span className="h-1.5 w-1.5 bg-lime-400 rounded-full animate-pulse" />
+                  try next
+                </div>
+                <button
+                  onClick={() => setShowNextPanel(false)}
+                  className="w-7 h-7 inline-flex items-center justify-center text-stone-500 hover:text-stone-900 dark:hover:text-stone-50 border border-stone-200 dark:border-white/10 rounded-md hover:border-stone-400 dark:hover:border-white/30 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {similarProblems.map((sp) => (
+                  <Link
+                    key={sp.id}
+                    to={`/learn/dsa/problem/${sp.slug}`}
+                    className="group block border border-stone-200 dark:border-white/10 rounded-md p-3.5 hover:border-stone-400 dark:hover:border-white/30 transition-colors no-underline bg-stone-50 dark:bg-stone-950"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`inline-flex items-center px-2 py-0.5 text-xs font-mono uppercase tracking-wider border rounded-md ${DIFF_STYLE[sp.difficulty] || "text-stone-600 dark:text-stone-400 border-stone-200 dark:border-white/10"}`}>
+                        {sp.difficulty}
+                      </span>
+                    </div>
+                    <p className="text-sm font-semibold text-stone-900 dark:text-stone-50 group-hover:text-lime-600 dark:group-hover:text-lime-400 transition-colors leading-snug truncate">
+                      {sp.title}
+                    </p>
+                    <div className="mt-2 flex gap-1.5 overflow-hidden">
+                      {sp.tags.slice(0, 2).map((tag) => (
+                        <span
+                          key={tag}
+                          className="text-[9px] font-mono uppercase tracking-wider text-stone-500 bg-stone-100 dark:bg-stone-800 px-1.5 py-0.5 rounded-sm truncate"
+                        >
+                          {tag.replace(/-/g, " ")}
+                        </span>
+                      ))}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+              {problem.tags[0] && (
+                <div className="mt-3 text-center">
+                  <Link
+                    to={`/learn/dsa/${problem.tags[0]}`}
+                    className="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-widest text-stone-500 hover:text-lime-600 dark:hover:text-lime-400 transition-colors no-underline"
+                  >
+                    back to topic
+                  </Link>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
+  );
+}
+function SolutionWalkthrough({ steps, code }: { steps: SolutionStep[]; code?: string | null }) {
+  const [current, setCurrent] = useState(0);
+  const step = steps[current];
+
+  return (
+    <div className="space-y-3">
+      {/* Step nav */}
+      <div className="flex items-center justify-between gap-3">
+        <button
+          onClick={() => setCurrent((c) => Math.max(0, c - 1))}
+          disabled={current === 0}
+          className="w-8 h-8 inline-flex items-center justify-center border border-stone-200 dark:border-white/10 rounded-md text-stone-600 dark:text-stone-400 hover:border-stone-400 dark:hover:border-white/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+        <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500 tabular-nums">
+          step {current + 1} / {steps.length}
+        </span>
+        <button
+          onClick={() => setCurrent((c) => Math.min(steps.length - 1, c + 1))}
+          disabled={current === steps.length - 1}
+          className="w-8 h-8 inline-flex items-center justify-center border border-stone-200 dark:border-white/10 rounded-md text-stone-600 dark:text-stone-400 hover:border-stone-400 dark:hover:border-white/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Step dots */}
+      <div className="flex items-center gap-1 flex-wrap">
+        {steps.map((s, i) => (
+          <button
+            key={i}
+            onClick={() => setCurrent(i)}
+            className={`h-1.5 rounded-full transition-all ${
+              i === current
+                ? "w-4 bg-lime-400"
+                : s.isKeyStep
+                  ? "w-2 bg-amber-400"
+                  : "w-2 bg-stone-300 dark:bg-stone-700"
+            }`}
+          />
+        ))}
+      </div>
+
+      {/* Step card */}
+      <motion.div
+        key={current}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className={`bg-white dark:bg-stone-900 border rounded-md p-4 ${
+          step.isKeyStep
+            ? "border-amber-300 dark:border-amber-900/60"
+            : "border-stone-200 dark:border-white/10"
+        }`}
+      >
+        <div className="flex items-start gap-3 mb-3">
+          <span className={`text-[10px] font-mono font-bold tabular-nums shrink-0 mt-0.5 ${
+            step.isKeyStep ? "text-amber-600 dark:text-amber-400" : "text-lime-600 dark:text-lime-400"
+          }`}>
+            {String(step.stepNumber).padStart(2, "0")}
+          </span>
+          <p className="text-sm text-stone-700 dark:text-stone-300 leading-relaxed">
+            {step.description}
+          </p>
+        </div>
+
+        {/* Variables table */}
+        {Object.keys(step.variables).length > 0 && (
+          <div className="border border-stone-200 dark:border-white/10 rounded-md overflow-hidden">
+            <div className="px-3 py-1.5 bg-stone-50 dark:bg-stone-800 border-b border-stone-200 dark:border-white/10">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500">
+                variable state
+              </span>
+            </div>
+            <table className="w-full text-xs font-mono">
+              <tbody>
+                {Object.entries(step.variables).map(([key, val]) => (
+                  <tr key={key} className="border-b border-stone-100 dark:border-white/5 last:border-0">
+                    <td className="px-3 py-2 text-stone-500 dark:text-stone-400 w-1/3">{key}</td>
+                    <td className="px-3 py-2 text-lime-600 dark:text-lime-400">{val}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </motion.div>
+
+      {/* Code with highlighted line */}
+      {code && step.highlightLine && (
+        <div className="border border-stone-200 dark:border-white/10 rounded-md overflow-hidden">
+          <div className="px-3 py-1.5 bg-stone-50 dark:bg-stone-800 border-b border-stone-200 dark:border-white/10">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500">
+              code / line {step.highlightLine} active
+            </span>
+          </div>
+          <pre className="p-4 bg-stone-950 text-stone-100 text-xs leading-relaxed overflow-x-auto">
+            {code.split("\n").map((line, i) => (
+              <div
+                key={i}
+                className={`px-2 -mx-2 ${
+                  i + 1 === step.highlightLine
+                    ? "bg-lime-400/20 border-l-2 border-lime-400"
+                    : ""
+                }`}
+              >
+                <span className="select-none text-stone-600 mr-3 tabular-nums">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                {line}
+              </div>
+            ))}
+          </pre>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -750,15 +993,12 @@ function ExtLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-function cleanHint(html: string): string {
-  return html
-    .replace(/<div[^>]*>/gi, "")
-    .replace(/<\/div>/gi, "")
-    .replace(/<code>/gi, "<code class='px-1.5 py-0.5 bg-stone-100 dark:bg-stone-800 rounded-sm text-sm font-mono'>");
-}
-
 function formatDescription(md: string): string {
   return md
+    .replace(
+      /!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g,
+      "<img src=\"$2\" alt=\"$1\" loading=\"lazy\" class=\"max-w-full rounded-md border border-stone-200 dark:border-white/10 my-2\" />",
+    )
     .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
     .replace(/`(.*?)`/g, "<code class='px-1.5 py-0.5 bg-stone-100 dark:bg-stone-800 rounded-sm text-sm font-mono'>$1</code>")
     .replace(/_([^_]+)_/g, "<em>$1</em>")

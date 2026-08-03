@@ -1,19 +1,71 @@
 import type { Request, Response, NextFunction } from "express";
 import type { AtsService } from "./ats.service.js";
-import { applySuggestionsSchema, scoreResumeSchema } from "./ats.validation.js";
+import { applySuggestionsSchema, scoreResumeSchema, guestScoreResumeSchema } from "./ats.validation.js";
+import { hashGuestIp } from "../../utils/guest-ip.utils.js";
 import { prisma } from "../../database/db.js";
-import { DAILY_LIMITS, getPlanTier } from "../../config/usage-limits.js";
+import { DAILY_LIMITS, MONTHLY_LIMITS, getPlanTier, type UsageAction } from "../../config/usage-limits.js";
 import { sendEmail } from "../../utils/email.utils.js";
 import { atsScoreReportHtml } from "../../utils/email-templates.js";
 import { isPremiumUser } from "../../utils/premium.utils.js";
 
-// Only email the report when the score row was just created; cached hits
-// (re-scoring the same resume+JD within the service's 24h window) reuse the
-// same row so we don't want to spam the student's inbox.
-const FRESH_SCORE_WINDOW_MS = 30_000;
-
 export class AtsController {
   constructor(private readonly atsService: AtsService) {}
+
+  async scoreResumeGuest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const ipHash = hashGuestIp(req);
+      const result = guestScoreResumeSchema(ipHash).safeParse(req.body);
+      if (!result.success) {
+        res.status(400).json({ message: "Validation failed", errors: result.error.flatten() });
+        return;
+      }
+
+      // Check daily guest limit before initiating costly AI processing
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      const usageLog = await prisma.guestUsage.findUnique({
+        where: { ipHash_date: { ipHash, date: today } },
+      });
+      if (usageLog && usageLog.count >= 2) {
+        res.status(429).json({
+          message: "Daily guest limit reached. Create a free account for more ATS scores.",
+        });
+        return;
+      }
+
+      const score = await this.atsService.scoreResumeGuest(ipHash, result.data);
+
+      // Increment usage count only after successful analysis
+      const updatedLog = await prisma.guestUsage.upsert({
+        where: { ipHash_date: { ipHash, date: today } },
+        update: { count: { increment: 1 } },
+        create: { ipHash, date: today, count: 1 },
+      });
+
+      res.json({
+        message: "Resume scored successfully",
+        score,
+        guest: true,
+        usage: { used: updatedLog.count, limit: 2 },
+      });
+    } catch (err) {
+      if (err instanceof Error) {
+        if (err.message.includes("Could not extract")) {
+          res.status(400).json({ message: err.message });
+          return;
+        }
+        if (err.message.includes("Invalid resume URL") || err.message.includes("does not belong")) {
+          res.status(403).json({ message: err.message });
+          return;
+        }
+        if (err.message.includes("ENOENT")) {
+          res.status(404).json({ message: "Resume file not found. Please upload again." });
+          return;
+        }
+      }
+      next(err);
+    }
+  }
 
   async scoreResume(req: Request, res: Response, next: NextFunction) {
     try {
@@ -30,24 +82,16 @@ export class AtsController {
 
       const score = await this.atsService.scoreResume(req.user.id, result.data);
 
-      await prisma.usageLog.create({ data: { userId: req.user.id, action: "ATS_SCORE" } });
-
       const usage = req.usageInfo
         ? { used: req.usageInfo.used + 1, limit: req.usageInfo.limit }
         : undefined;
 
-      const isFresh =
-        Date.now() - new Date(score.createdAt).getTime() < FRESH_SCORE_WINDOW_MS;
-      let emailQueued = false;
-      if (isFresh) {
-        emailQueued = true;
-        // Fire-and-forget: don't block the response on Resend latency.
-        void this.sendScoreReportEmail(req.user.id, score).catch((err) => {
-          console.error("[ATS] failed to send score report email:", err);
-        });
-      }
+      // Fire-and-forget: don't block the response on Resend latency.
+      void this.sendScoreReportEmail(req.user.id, score).catch((err) => {
+        console.error("[ATS] failed to send score report email:", err);
+      });
 
-      res.json({ message: "Resume scored successfully", score, usage, emailQueued });
+      res.json({ message: "Resume scored successfully", score, usage, emailQueued: true });
     } catch (err) {
       if (err instanceof Error) {
         if (err.message.includes("Could not extract")) {
@@ -83,8 +127,6 @@ export class AtsController {
       }
 
       const response = await this.atsService.applySuggestions(req.user.id, result.data);
-
-      await prisma.usageLog.create({ data: { userId: req.user.id, action: "GENERATE_RESUME" } });
 
       res.json(response);
     } catch (err) {
@@ -128,24 +170,52 @@ export class AtsController {
 
       const tier = getPlanTier(user.subscriptionPlan, user.subscriptionStatus, user.subscriptionEndDate);
 
+      const monthlyActions: UsageAction[] = ["ATS_SCORE", "ROADMAP_GENERATION", "GSOC_REVIEW"];
+
       const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
+      startOfDay.setUTCHours(0, 0, 0, 0);
 
-      const counts = await prisma.usageLog.groupBy({
-        by: ["action"],
-        where: { userId: req.user.id, createdAt: { gte: startOfDay } },
-        _count: { id: true },
-      });
+      const startOfMonth = new Date();
+      startOfMonth.setUTCDate(1);
+      startOfMonth.setUTCHours(0, 0, 0, 0);
 
-      const countMap = Object.fromEntries(
-        counts.map((c) => [c.action, c._count.id]),
+      const [dailyCounts, monthlyCounts] = await Promise.all([
+        prisma.usageLog.groupBy({
+          by: ["action"],
+          where: { userId: req.user.id, createdAt: { gte: startOfDay } },
+          _count: { id: true },
+        }),
+        prisma.usageLog.groupBy({
+          by: ["action"],
+          where: { userId: req.user.id, createdAt: { gte: startOfMonth } },
+          _count: { id: true },
+        }),
+      ]);
+
+      const dailyCountMap = Object.fromEntries(
+        dailyCounts.map((c) => [c.action, c._count.id]),
+      );
+      const monthlyCountMap = Object.fromEntries(
+        monthlyCounts.map((c) => [c.action, c._count.id]),
       );
 
-      const usage = Object.entries(DAILY_LIMITS).map(([action, limits]) => ({
-        action,
-        used: (countMap[action] as number) ?? 0,
-        limit: limits[tier],
-      }));
+      const usage = Object.entries(DAILY_LIMITS).map(([action, limits]) => {
+        if (monthlyActions.includes(action as UsageAction)) {
+          const monthlyLimits = MONTHLY_LIMITS[action as UsageAction] ?? limits;
+          return {
+            action,
+            used: (monthlyCountMap[action] as number) ?? 0,
+            limit: monthlyLimits[tier],
+            window: "monthly",
+          };
+        }
+        return {
+          action,
+          used: (dailyCountMap[action] as number) ?? 0,
+          limit: limits[tier],
+          window: "daily",
+        };
+      });
 
       res.json({ tier, usage });
     } catch (err) {
@@ -190,19 +260,5 @@ export class AtsController {
 
     const subject = `Your resume scored ${score.overallScore}/100 on InternHack`;
     await sendEmail({ to: user.email, subject, html });
-  }
-
-  /** GET /api/ats/history — returns the authenticated student's recent score history. */
-  async getScoreHistory(req: Request, res: Response, next: NextFunction) {
-    try {
-      if (!req.user) {
-        res.status(401).json({ message: "Authentication required" });
-        return;
-      }
-      const history = await this.atsService.getScoreHistory(req.user.id);
-      res.json({ history });
-    } catch (err) {
-      next(err);
-    }
   }
 }

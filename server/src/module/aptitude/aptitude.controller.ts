@@ -31,6 +31,7 @@ export class AptitudeController {
   async submitAnswer(req: Request, res: Response, next: NextFunction) {
     try {
       const questionId = parseInt(req.params.id as string);
+      if (isNaN(questionId)) return res.status(400).json({ error: "Invalid question ID" });
       const studentId = req.user!.id;
       const { answer } = req.body;
       if (!answer) return res.status(400).json({ error: "Answer is required" });
@@ -78,6 +79,16 @@ export class AptitudeController {
       const studentId = req.user!.id;
       const progress = await this.service.getProgress(studentId);
       res.json(progress);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getWeakAreas(req: Request, res: Response, next: NextFunction) {
+    try {
+      const studentId = req.user!.id;
+      const weakAreas = await this.service.getWeakAreas(studentId);
+      res.json(weakAreas);
     } catch (err) {
       next(err);
     }

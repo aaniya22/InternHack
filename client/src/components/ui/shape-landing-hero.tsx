@@ -1,8 +1,8 @@
-import { motion, AnimatePresence, useAnimation } from "framer-motion";
+import { motion, AnimatePresence, useAnimation, useMotionValue, useReducedMotion } from "framer-motion";
 import { Link } from "react-router";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import NumberFlow from "@number-flow/react";
-import { ArrowRight, Play, Star } from "lucide-react";
+import { ArrowRight, Play, Star, PlugZap } from "lucide-react";
 import { useAuthStore } from "@/lib/auth.store";
 
 const ROTATING_WORDS = ["offer.", "internship.", "interview.", "callback.", "dream job."];
@@ -43,9 +43,7 @@ function HeroGeometric() {
   const getStartedHref = isAuthenticated
     ? user?.role === "ADMIN"
       ? "/admin"
-      : user?.role === "RECRUITER"
-        ? "/recruiters"
-        : "/student/applications"
+      : "/student/applications"
     : "/register";
 
   const [wordIdx, setWordIdx] = useState(0);
@@ -117,7 +115,7 @@ function HeroGeometric() {
           className="mt-8 text-base md:text-lg text-stone-600 dark:text-stone-400 max-w-2xl mx-auto leading-relaxed"
         >
           InternHack scores your resume, sharpens your DSA, runs mock
-          interviews, and sends your application straight to recruiters hiring.
+          interviews, and sends your application straight to companies hiring.
         </motion.p>
 
         <motion.div
@@ -127,18 +125,28 @@ function HeroGeometric() {
           className="mt-10 flex flex-col sm:flex-row gap-3 justify-center items-center"
         >
           <Link to={getStartedHref} className="no-underline">
-            <button className="group inline-flex items-center gap-2 px-6 py-3.5 bg-lime-400 text-stone-950 rounded-lg text-sm font-bold hover:bg-lime-300 transition-colors cursor-pointer border-0">
+            <button type="button" className="group inline-flex items-center gap-2 px-6 py-3.5 bg-lime-400 text-stone-950 rounded-lg text-sm font-bold hover:bg-lime-300 transition-colors cursor-pointer border-0">
               {isAuthenticated ? "Open dashboard" : "Start free"}
               <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </button>
           </Link>
           <a href="#demo" className="no-underline">
-            <button className="inline-flex items-center gap-2 px-6 py-3.5 rounded-lg text-sm font-semibold text-stone-900 dark:text-stone-100 bg-transparent border border-stone-300 dark:border-white/15 hover:bg-stone-100 dark:hover:bg-white/5 transition-colors cursor-pointer">
+            <button type="button" className="inline-flex items-center gap-2 px-6 py-3.5 rounded-lg text-sm font-semibold text-stone-900 dark:text-stone-100 bg-transparent border border-stone-300 dark:border-white/15 hover:bg-stone-100 dark:hover:bg-white/5 transition-colors cursor-pointer">
               <Play className="w-4 h-4 fill-current" />
               Watch 90s demo
             </button>
           </a>
         </motion.div>
+
+        <motion.p
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.32 }}
+          className="mt-6 inline-flex items-center gap-2 text-xs md:text-sm text-stone-600 dark:text-stone-400"
+        >
+          <PlugZap className="w-4 h-4 text-lime-500" />
+          Plus a free browser extension that autofills applications on Greenhouse, Lever, Workday and more.
+        </motion.p>
 
         <motion.div
           initial={{ opacity: 0 }}
@@ -158,29 +166,6 @@ function HeroGeometric() {
       </div>
 
       <WinsMarquee />
-
-      <div className="relative z-10 max-w-6xl mx-auto px-6 py-10 border-t border-stone-200 dark:border-white/10">
-        <div className="text-xs font-mono uppercase tracking-widest text-stone-500 mb-4 text-center">
-          Trusted by students at
-        </div>
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm font-semibold text-stone-500 dark:text-stone-500">
-          <span>IITs</span>
-          <span className="text-stone-300 dark:text-stone-700">/</span>
-          <span>NITs</span>
-          <span className="text-stone-300 dark:text-stone-700">/</span>
-          <span>BITS Pilani</span>
-          <span className="text-stone-300 dark:text-stone-700">/</span>
-          <span>IIITs</span>
-          <span className="text-stone-300 dark:text-stone-700">/</span>
-          <span>VIT</span>
-          <span className="text-stone-300 dark:text-stone-700">/</span>
-          <span>SRM</span>
-          <span className="text-stone-300 dark:text-stone-700">/</span>
-          <span>Manipal</span>
-          <span className="text-stone-300 dark:text-stone-700">/</span>
-          <span>200+ colleges</span>
-        </div>
-      </div>
     </section>
   );
 }
@@ -227,9 +212,9 @@ function StatCell({
   suffix?: string;
 }) {
   return (
-    <div className="bg-stone-50 dark:bg-stone-950 p-3 sm:p-5 text-left min-w-0">
-      <div className="text-lg sm:text-2xl md:text-4xl font-bold tracking-tight tabular-nums text-stone-900 dark:text-stone-50 wrap-break-word">
-        <NumberFlow value={value} />
+    <div className="bg-stone-50 dark:bg-stone-950 p-3 sm:p-5 min-w-0 flex flex-col items-center">
+      <div className="text-lg sm:text-2xl md:text-4xl font-bold tracking-tight tabular-nums text-stone-900 dark:text-stone-50 w-[6ch] text-right">
+        <NumberFlow value={value} className="tabular-nums"/>
         {suffix && (
           <span className="text-lime-500 dark:text-lime-400">{suffix}</span>
         )}
@@ -243,18 +228,54 @@ function StatCell({
 
 function WinsMarquee() {
   const controls = useAnimation();
+  const x = useMotionValue(0)
   const isPausedByClick = useRef(false);
-  
-  const startAnimation = () => {
-    controls.start({
-      x: ["0%", "-50%"],
-      transition: { duration: 90, repeat: Infinity, ease: "linear" },
-    });
-  };
+  const shouldReduceMotion = useReducedMotion();
+  const [isDragging, setIsDragging] = useState(false);
 
-  useEffect( () => {
+  const startAnimation = useCallback(() => {
+    if (shouldReduceMotion || isDragging) return;
+
+    controls.start({
+      x: "-50%",
+      transition: {
+        duration: 90,
+        repeat: Infinity,
+        ease: "linear",
+      },
+    });
+  }, [controls, isDragging, shouldReduceMotion]);
+
+  useEffect(() => {
     startAnimation();
-  }, []);
+  }, [startAnimation]);
+
+  // Pause animation when tab is not active and resume when active again
+  useEffect(() => {
+  const handleVisibilityChange = () => {
+      if (document.hidden) {
+        controls.stop();
+      } else if (
+        !isPausedByClick.current &&
+        !shouldReduceMotion &&
+        !isDragging
+      ) {
+        startAnimation();
+      }
+    };
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange,
+    );
+
+    return () => {
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
+    };
+  }, [controls, shouldReduceMotion, isDragging, startAnimation]);
 
   const mouseEnter = () => {
     controls.stop();
@@ -280,7 +301,7 @@ function WinsMarquee() {
   return (
     <div
       className="relative py-6 border-y border-stone-200 dark:border-white/10 bg-stone-100/60 dark:bg-white/2 overflow-hidden"
-      aria-hidden
+      aria-label="Recent student placement wins"
     >
       <div className="pointer-events-none absolute inset-y-0 left-0 w-24 bg-linear-to-r from-stone-100/60 dark:from-stone-950 to-transparent z-10" />
       <div className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-linear-to-l from-stone-100/60 dark:from-stone-950 to-transparent z-10" />
@@ -300,6 +321,22 @@ function WinsMarquee() {
       <motion.div
         className="flex gap-3 whitespace-nowrap w-max"
         animate={ controls }
+        style={{ x }}
+        drag="x"
+        dragConstraints={{ left: -1200, right: 0 }}
+        dragElastic={0.08}
+        whileTap={{ cursor: "grabbing" }}
+        onDragStart={() => {
+          setIsDragging(true);
+          controls.stop();
+        }}
+        onDragEnd={() => {
+          setIsDragging(false);
+
+          if (!isPausedByClick.current && !shouldReduceMotion) {
+            startAnimation();
+          }
+        }}
       >
         {row.map((w, i) => (
           <div

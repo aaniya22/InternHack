@@ -1,4 +1,6 @@
 import { prisma } from "../../database/db.js";
+import { cacheDel } from "../../utils/cache.js";
+import { LANGUAGES_CACHE_KEY } from "../opensource/opensource.service.js";
 import type { Prisma } from "@prisma/client";
 
 export class AdminOpensourceService {
@@ -95,8 +97,9 @@ export class AdminOpensourceService {
     tags?: string[];
     highlights?: string[];
     trending?: boolean;
+    hacktoberfest?: boolean;
   }) {
-    return prisma.opensourceRepo.create({
+    const repo = await prisma.opensourceRepo.create({
       data: {
         name: input.name,
         owner: input.owner,
@@ -118,8 +121,11 @@ export class AdminOpensourceService {
         tags: input.tags ?? [],
         highlights: input.highlights ?? [],
         trending: input.trending ?? false,
+        hacktoberfest: input.hacktoberfest ?? false,
       },
     });
+    cacheDel(LANGUAGES_CACHE_KEY).catch(() => {});
+    return repo;
   }
 
   async updateRepo(repoId: number, input: Record<string, unknown>) {
@@ -129,12 +135,15 @@ export class AdminOpensourceService {
     if (!repo) throw new Error("Repository not found");
 
     const data: Prisma.opensourceRepoUpdateInput = {};
+    let languageChanged = false;
     if (input["name"] !== undefined) data.name = input["name"] as string;
     if (input["owner"] !== undefined) data.owner = input["owner"] as string;
     if (input["description"] !== undefined)
       data.description = input["description"] as string;
-    if (input["language"] !== undefined)
+    if (input["language"] !== undefined) {
       data.language = input["language"] as string;
+      languageChanged = true;
+    }
     if (input["techStack"] !== undefined)
       data.techStack = input["techStack"] as string[];
     if (input["difficulty"] !== undefined)
@@ -159,8 +168,12 @@ export class AdminOpensourceService {
       data.highlights = input["highlights"] as string[];
     if (input["trending"] !== undefined)
       data.trending = input["trending"] as boolean;
+    if (input["hacktoberfest"] !== undefined)
+      data.hacktoberfest = input["hacktoberfest"] as boolean;
 
-    return prisma.opensourceRepo.update({ where: { id: repoId }, data });
+    const updated = await prisma.opensourceRepo.update({ where: { id: repoId }, data });
+    if (languageChanged) cacheDel(LANGUAGES_CACHE_KEY).catch(() => {});
+    return updated;
   }
 
   async deleteRepo(repoId: number) {
@@ -168,6 +181,9 @@ export class AdminOpensourceService {
       where: { id: repoId },
     });
     if (!repo) throw new Error("Repository not found");
-    return prisma.opensourceRepo.delete({ where: { id: repoId } });
+    const result = await prisma.opensourceRepo.delete({ where: { id: repoId } });
+    cacheDel(LANGUAGES_CACHE_KEY).catch(() => {});
+    return result;
   }
+
 }

@@ -42,11 +42,7 @@ export default function VerifyEmailPage() {
         const { data } = await api.post("/auth/verify-email", { email, otp: code });
         login(data.user);
         toast.success("Email verified successfully!");
-        if (data.user.role === "RECRUITER") {
-          navigate("/recruiters");
-        } else {
-          navigate("/student/applications");
-        }
+        navigate("/student/applications");
       } catch (err: unknown) {
         const error = err as { response?: { data?: { message?: string } } };
         setError(error.response?.data?.message || "Verification failed");
@@ -122,7 +118,7 @@ export default function VerifyEmailPage() {
       <SEO
         title="Verify Email"
         description="Verify your email address to activate your InternHack account."
-        keywords="verify email, OTP, InternHack, email verification"
+        noIndex
       />
       <Navbar />
       <div className="flex-1 flex items-center justify-center px-4 pt-24 pb-12">

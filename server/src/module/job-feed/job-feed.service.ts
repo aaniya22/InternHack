@@ -1,5 +1,9 @@
+﻿import { Prisma } from "@prisma/client";
 import { prisma } from "../../database/db.js";
 import { jobIndexService } from "../job-index/job-index.service.js";
+import { cacheGet, cacheSet, cacheDel } from "../../utils/cache.js";
+
+const prefKey = (id: number) => `job-pref:${id}`;
 
 export class JobFeedService {
   async getFeed(userId: number, page = 1, limit = 10) {
@@ -56,7 +60,12 @@ export class JobFeedService {
     await prisma.userJobPreference.update({
       where: { userId },
       data: { dismissedJobIds: { push: match.jobIndexId } },
-    }).catch(() => {}); // pref may not exist yet
+    }).catch((err) => {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+        return;
+      }
+      throw err;
+    });
   }
 
   async save(userId: number, matchId: number) {
@@ -99,7 +108,12 @@ export class JobFeedService {
   }
 
   async getPreferences(userId: number) {
-    return prisma.userJobPreference.findUnique({ where: { userId } });
+    const cached = await cacheGet(prefKey(userId));
+    if (cached) return cached as never;
+
+    const pref = await prisma.userJobPreference.findUnique({ where: { userId } });
+    await cacheSet(prefKey(userId), pref, 3600);
+    return pref;
   }
 
   async updatePreferences(
@@ -121,8 +135,9 @@ export class JobFeedService {
     });
 
     // Re-generate embedding asynchronously
-    jobIndexService.generateUserEmbedding(userId).catch(() => {});
+    jobIndexService.generateUserEmbedding(userId).catch((err) => console.error("Failed to generate user embedding:", err));
 
+    await cacheDel(prefKey(userId));
     return pref;
   }
 
@@ -137,3 +152,4 @@ export class JobFeedService {
 }
 
 export const jobFeedService = new JobFeedService();
+

@@ -16,6 +16,7 @@
     <meta name="theme-color" content="#030712" />
     <meta name="application-name" content="InternHack" />
     <meta name="apple-mobile-web-app-title" content="InternHack" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="format-detection" content="telephone=no" />
@@ -42,7 +43,7 @@
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="InternHack, AI-powered career platform for students" />
     <meta property="og:site_name" content="InternHack" />
-    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale" content="en_IN" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
@@ -57,7 +58,7 @@
       name="twitter:description"
       content="Browse curated internships, score your resume with AI-powered ATS analysis, follow guided career roadmaps, and connect with recruiters."
     />
-    <meta name="twitter:image" content="https://www.internhack.xyz/og-image.png" />
+    <meta name="twitter:image" content="https://www.internhack.xyz/og-image-dark.png" />
     <meta name="twitter:image:alt" content="InternHack, AI-powered career platform for students" />
 
     <!-- NOTE: Per-route canonical is injected at runtime by the <SEO> component
@@ -73,7 +74,7 @@
         "url": "https://www.internhack.xyz",
         "potentialAction": {
           "@type": "SearchAction",
-          "target": "https://www.internhack.xyz/jobs?search={search_term_string}",
+          "target": "https://www.internhack.xyz/external-jobs?search={search_term_string}",
           "query-input": "required name=search_term_string"
         }
       }
@@ -110,12 +111,20 @@
       {
         "@context": "https://schema.org",
         "@type": ["Organization", "EducationalOrganization"],
+        "@id": "https://www.internhack.xyz/#organization",
         "name": "InternHack",
         "url": "https://www.internhack.xyz",
-        "logo": "https://www.internhack.xyz/favicon.png",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://www.internhack.xyz/og-image.png",
+          "width": 1200,
+          "height": 630
+        },
         "description": "AI-powered career platform connecting students with internships, coding tutorials, and career tools.",
         "sameAs": [
-          "https://github.com/SachinChaurasiya/InternHack"
+          "https://github.com/SachinChaurasiya/InternHack",
+          "https://twitter.com/internhack",
+          "https://www.linkedin.com/company/internhack"
         ]
       }
     </script>
@@ -123,6 +132,7 @@
     <!-- Preconnect to critical origins (preconnect supersedes dns-prefetch) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://api.internhack.xyz" />
     <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
 
     <!-- Fonts (non-blocking) -->
@@ -157,19 +167,16 @@
         </p>
         <h2>What you can do on InternHack</h2>
         <ul>
-          <li><a href="/jobs">Internship and job board</a>, curated listings from top companies.</li>
-          <li><a href="/ats">AI ATS resume scorer</a>, get an instant score and actionable fixes.</li>
+          <li><a href="/external-jobs">Internship and job board</a>, curated listings from top companies.</li>
+          <li><a href="/ats-score">AI ATS resume scorer</a>, get an instant score and actionable fixes.</li>
           <li><a href="/companies">Company explorer</a>, research employers before you apply.</li>
-          <li><a href="/roadmap">Career roadmaps</a>, step-by-step guidance for frontend, backend, data, and more.</li>
-          <li><a href="/dsa">DSA practice tracker</a>, organized problems with progress tracking.</li>
-          <li><a href="/blog">Blog and guides</a>, interview prep, career advice, and tutorials.</li>
+          <li><a href="/roadmaps">Career roadmaps</a>, step-by-step guidance for frontend, backend, data, and more.</li>
+          <li><a href="/learn/dsa">DSA practice tracker</a>, organized problems with progress tracking.</li>
+          <li><a href="/learn/interview">Interview prep</a>, 650+ questions with worked answers across 18 tracks.</li>
+          <li><a href="/learn">Coding tutorials</a>, JavaScript, TypeScript, React, Python, Node, and more.</li>
           <li><a href="/opensource">Open-source projects</a>, contribute to real codebases.</li>
+          <li><a href="/internships">Government internships</a>, verified public-sector programmes.</li>
         </ul>
-        <h2>For recruiters</h2>
-        <p>
-          Post roles, review AI-ranked candidates, and reach motivated student talent.
-          <a href="/recruiters">Learn more about recruiter tools</a>.
-        </p>
         <p>
           InternHack is a free, AI-powered career platform.
           JavaScript is required to use the full application. Please enable JavaScript in your browser.

@@ -1,7 +1,9 @@
 import cron from "node-cron";
 import { prisma } from "../database/db.js";
 import { sendEmail } from "../utils/email.utils.js";
+import { buildUnsubscribeUrl } from "../utils/unsubscribe.utils.js";
 import { roadmapDay10EmailHtml } from "../utils/email-templates.js";
+import { withAdvisoryLock } from "../utils/cron-lock.js";
 
 let cronJob: cron.ScheduledTask | null = null;
 
@@ -18,7 +20,7 @@ interface Day10Payload {
  * Drain due rows from scheduledEmail. Each kind has its own renderer.
  * Idempotent: a row is considered done once sentAt is set.
  */
-async function drainScheduledEmails(): Promise<void> {
+export async function drainScheduledEmails(): Promise<void> {
   const now = new Date();
   const due = await prisma.scheduledEmail.findMany({
     where: {
@@ -29,7 +31,7 @@ async function drainScheduledEmails(): Promise<void> {
     orderBy: { sendAt: "asc" },
     take: BATCH_SIZE,
     include: {
-      user: { select: { id: true, name: true, email: true, isActive: true } },
+      user: { select: { id: true, name: true, email: true, isActive: true, unsubscribeDigest: true } },
     },
   });
 
@@ -37,11 +39,11 @@ async function drainScheduledEmails(): Promise<void> {
   console.log(`[ScheduledEmail] Processing ${due.length} due email(s)`);
 
   for (const row of due) {
-    if (!row.user.isActive) {
+    if (!row.user.isActive || row.user.unsubscribeDigest) {
       // Skip and mark sent so we don't keep retrying
       await prisma.scheduledEmail.update({
         where: { id: row.id },
-        data: { sentAt: now, lastError: "user inactive" },
+        data: { sentAt: now, lastError: row.user.isActive ? "user unsubscribed" : "user inactive" },
       });
       continue;
     }
@@ -130,14 +132,26 @@ async function sendDay10(
       plannedTopics,
       nextTopicSlug: nextTopic?.slug ?? null,
     }),
+    unsubscribeUrl: buildUnsubscribeUrl(user.id),
   });
 }
 
-/** Start the scheduled-email worker. Default cadence: every 5 minutes. */
-export function startScheduledEmailWorker(schedule = "*/5 * * * *"): void {
+/** Start the scheduled-email worker. Default cadence: every 30 minutes. */
+export function startScheduledEmailWorker(schedule = "*/30 * * * *"): void {
   if (cronJob) return;
   cronJob = cron.schedule(schedule, () => {
-    void drainScheduledEmails();
+    void withAdvisoryLock("scheduled-email-worker", async () => {
+      await drainScheduledEmails();
+    });
   });
   console.log(`[ScheduledEmail] Worker scheduled with cadence "${schedule}"`);
+}
+
+/** Stop the scheduled-email worker (used during graceful shutdown). */
+export function stopScheduledEmailWorker(): void {
+  if (cronJob) {
+    cronJob.stop();
+    cronJob = null;
+    console.log("[ScheduledEmail] Worker stopped");
+  }
 }

@@ -8,16 +8,37 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 
-const s3Client = new S3Client({
-  region: process.env["AWS_REGION"] || "ap-south-1",
-  credentials: {
-    accessKeyId: process.env["AWS_ACCESS_KEY_ID"] || "",
-    secretAccessKey: process.env["AWS_SECRET_ACCESS_KEY"] || "",
-  },
-});
+const AWS_REGION = process.env["AWS_REGION"] || "ap-south-1";
+const AWS_ACCESS_KEY_ID = process.env["AWS_ACCESS_KEY_ID"];
+const AWS_SECRET_ACCESS_KEY = process.env["AWS_SECRET_ACCESS_KEY"];
+const AWS_S3_BUCKET = process.env["AWS_S3_BUCKET"];
 
-const BUCKET = process.env["AWS_S3_BUCKET"] || "";
-const REGION = process.env["AWS_REGION"] || "ap-south-1";
+// S3 is an optional integration. Don't crash the entire API at import time when
+// it's unconfigured — a missing/empty credential should only fail the specific
+// S3 operation when it's actually invoked (mirrors google-calendar.utils.ts).
+const s3Configured = Boolean(AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY && AWS_S3_BUCKET);
+
+let s3ClientInstance: S3Client | null = null;
+function getS3Client(): S3Client {
+  if (!s3Configured) {
+    throw new Error(
+      "S3 configuration incomplete: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_S3_BUCKET must all be set in environment variables.",
+    );
+  }
+  if (!s3ClientInstance) {
+    s3ClientInstance = new S3Client({
+      region: AWS_REGION,
+      credentials: {
+        accessKeyId: AWS_ACCESS_KEY_ID as string,
+        secretAccessKey: AWS_SECRET_ACCESS_KEY as string,
+      },
+    });
+  }
+  return s3ClientInstance;
+}
+
+const BUCKET = AWS_S3_BUCKET ?? "";
+const REGION = AWS_REGION;
 
 function getBucketUrl(): string {
   return `https://${BUCKET}.s3.${REGION}.amazonaws.com`;
@@ -34,7 +55,7 @@ export async function uploadToS3(
   key: string,
   contentType: string,
 ): Promise<string> {
-  await s3Client.send(
+  await getS3Client().send(
     new PutObjectCommand({
       Bucket: BUCKET,
       Key: key,
@@ -49,11 +70,11 @@ async function getSignedS3Url(key: string, expiresIn = 3600): Promise<string> {
   const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
   // s3Client is cast to any due to a known TypeScript type mismatch/compatibility issue between @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner.
   // See: https://github.com/aws/aws-sdk-js-v3/issues/4312
-  return getSignedUrl(s3Client as any, command, { expiresIn });
+  return getSignedUrl(getS3Client() as any, command, { expiresIn });
 }
 
 export async function deleteFromS3(key: string): Promise<void> {
-  await s3Client.send(
+  await getS3Client().send(
     new DeleteObjectCommand({
       Bucket: BUCKET,
       Key: key,
@@ -62,13 +83,16 @@ export async function deleteFromS3(key: string): Promise<void> {
 }
 
 export async function getBufferFromS3(key: string): Promise<Buffer> {
-  const response = await s3Client.send(
+  const response = await getS3Client().send(
     new GetObjectCommand({
       Bucket: BUCKET,
       Key: key,
     }),
   );
-  return Buffer.from(await response.Body!.transformToByteArray());
+  if (!response.Body) {
+    throw new Error(`S3 object not found: ${key}`);
+  }
+  return Buffer.from(await response.Body.transformToByteArray());
 }
 
 export function getS3KeyFromUrl(url: string): string | null {
@@ -88,7 +112,18 @@ export async function signUrl(url: string, expiresIn = 3600): Promise<string> {
 
 /** Sign every URL in a string array (e.g. user.resumes). */
 export async function signUrls(urls: string[], expiresIn = 3600): Promise<string[]> {
-  return Promise.all(urls.map((u) => signUrl(u, expiresIn)));
+  // Cap concurrency to prevent spiking outbound calls and resource contention
+  const CONCURRENCY_LIMIT = 10;
+  const results: string[] = [];
+
+  for (let i = 0; i < urls.length; i += CONCURRENCY_LIMIT) {
+    const chunk = urls.slice(i, i + CONCURRENCY_LIMIT);
+    // Process only 10 URLs concurrently
+    const signedChunk = await Promise.all(chunk.map((u) => signUrl(u, expiresIn)));
+    results.push(...signedChunk);
+  }
+
+  return results;
 }
 
 
@@ -99,6 +134,10 @@ export interface UploadPolicy {
 
 export const UPLOAD_POLICIES: Record<string, UploadPolicy> = {
   "resumes": {
+    allowedMimeTypes: ["application/pdf"],
+    maxSize: 5 * 1024 * 1024, // 5 MB
+  },
+  "guest-resumes": {
     allowedMimeTypes: ["application/pdf"],
     maxSize: 5 * 1024 * 1024, // 5 MB
   },
@@ -129,7 +168,7 @@ export const generatePresignedUploadUrl = async (fileKey: string, fileType: stri
   // Use createPresignedPost to enforce strict file size limits (Denial of Wallet prevention)
   // s3Client is cast to any due to a known TypeScript type mismatch/compatibility issue between @aws-sdk/client-s3 and @aws-sdk/s3-presigned-post.
   // See: https://github.com/aws/aws-sdk-js-v3/issues/4312
-  const { url, fields } = await createPresignedPost(s3Client as any, {
+  const { url, fields } = await createPresignedPost(getS3Client() as any, {
     Bucket: BUCKET,
     Key: fileKey,
     Conditions: [

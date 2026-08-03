@@ -1,12 +1,21 @@
+import { ProgressBar } from "../../../components/ui/ProgressBar";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, Navigate } from "react-router";
 import { motion } from "framer-motion";
-import { CheckCircle2, ArrowUpRight } from "lucide-react";
-import { sections, questions } from "./data";
+import { CheckCircle2, ArrowUpRight, Building2, ArrowUpDown } from "lucide-react";
+import { sections, loadSectionQuestions } from "./data";
+import type { InterviewQuestion } from "./data/types";
 import { SEO } from "../../../components/SEO";
 import { canonicalUrl } from "../../../lib/seo.utils";
 import { useAuthStore } from "../../../lib/auth.store";
+import { Button } from "../../../components/ui/button";
 import api from "../../../lib/axios";
+import { useQuery } from "@tanstack/react-query";
+import { MetaChip } from "../../../components/ui/MetaChip";
+import { GridBackground } from "../../../components/ui/GridBackground";
+import { EditorialDropdown } from "../../../components/ui/EditorialDropdown";
+
+
 
 const DIFF_STYLE: Record<string, string> = {
   Beginner:     "text-green-700 dark:text-green-400 border-green-300 dark:border-green-900/60",
@@ -22,46 +31,87 @@ const TYPE_STYLE: Record<string, string> = {
   Experience:  "text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-900/60",
 };
 
-function MetaChip({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider border rounded-md ${className || "text-stone-600 dark:text-stone-400 border-stone-200 dark:border-white/10"}`}>
-      {children}
-    </span>
-  );
-}
+
 
 export default function InterviewSectionPage() {
   const { sectionSlug } = useParams();
   const basePath = "/learn/interview";
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const [activeDifficulty, setActiveDifficulty] = useState("All");
+  const [selectedCompany, setSelectedCompany] = useState("All");
+  const [sortBy, setSortBy] = useState("frequency");
 
-  const [completedIds, setCompletedIds] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const loadProgress = async () => {
-      setIsLoading(true);
-      try {
-        const res = await api.get("/interview-progress");
-        setCompletedIds(res.data.completedIds || []);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadProgress();
-  }, [isAuthenticated]);
+  const { data: progressData, isLoading } = useQuery({
+    queryKey: ["interview-progress"],
+    queryFn: () => api.get("/interview-progress").then((r) => r.data),
+    enabled: !!isAuthenticated,
+    staleTime: 5 * 60 * 1000,
+  });
+  const completedIds: string[] = progressData?.completedIds ?? [];
 
   const section = sections.find((s) => s.id === sectionSlug);
 
+  // Keyed by slug so switching sections never renders the previous section's
+  // questions while the new lesson file is still in flight.
+  const [loaded, setLoaded] = useState<{ slug: string; questions: InterviewQuestion[] } | null>(null);
+
+  useEffect(() => {
+    if (!sectionSlug) return;
+    let active = true;
+    loadSectionQuestions(sectionSlug)
+      .then((questions) => {
+        if (active) setLoaded({ slug: sectionSlug, questions });
+      })
+      .catch((err) => {
+        console.error("Failed to load interview questions", err);
+        if (active) setLoaded({ slug: sectionSlug, questions: [] });
+      });
+    return () => {
+      active = false;
+    };
+  }, [sectionSlug]);
+
   const sectionQuestions = useMemo(
-    () => questions.filter((q) => q.sectionId === sectionSlug).sort((a, b) => a.orderIndex - b.orderIndex),
-    [sectionSlug],
+    () => (loaded && loaded.slug === sectionSlug ? loaded.questions : []),
+    [loaded, sectionSlug],
   );
+
+  const availableCompanies = useMemo(() => {
+    const companies = new Set<string>();
+    sectionQuestions.forEach((q) => {
+      if (q.companies) {
+        q.companies.forEach((c) => companies.add(c));
+      }
+    });
+    return Array.from(companies).sort();
+  }, [sectionQuestions]);
+
+  // Filter and sort the questions
+  const filteredAndSortedQuestions = useMemo(() => {
+    let result = [...sectionQuestions];
+
+    // 1. Difficulty Filter
+    if (activeDifficulty !== "All") {
+      result = result.filter((q) => q.difficulty === activeDifficulty);
+    }
+
+    // 2. Company Filter
+    if (selectedCompany !== "All") {
+      result = result.filter((q) => q.companies?.includes(selectedCompany));
+    }
+
+    // 3. Sorting
+    result.sort((a, b) => {
+      if (sortBy === "frequency") {
+        return (b.frequency || 0) - (a.frequency || 0); // Highest first
+      } else if (sortBy === "order") {
+        return a.orderIndex - b.orderIndex; // Original order
+      }
+      return 0;
+    });
+
+    return result;
+  }, [sectionQuestions, activeDifficulty, selectedCompany, sortBy]);
 
   if (section && !section.freeTier && !isAuthenticated) {
     return <Navigate to={basePath} replace />;
@@ -93,14 +143,7 @@ export default function InterviewSectionPage() {
         canonicalUrl={canonicalUrl(`/learn/interview/${sectionSlug}`)}
       />
 
-      <div
-        aria-hidden
-        className="absolute inset-0 pointer-events-none opacity-[0.04] dark:opacity-[0.05] z-0"
-        style={{
-          backgroundImage: "linear-gradient(to right, rgba(120,113,108,0.25) 1px, transparent 1px)",
-          backgroundSize: "120px 100%",
-        }}
-      />
+      <GridBackground />
 
       <div className="relative max-w-6xl mx-auto">
         {/* Editorial header */}
@@ -119,6 +162,20 @@ export default function InterviewSectionPage() {
               {section.title}
             </h1>
             <p className="mt-3 text-sm text-stone-500 max-w-xl">{section.description}</p>
+            {sectionSlug === "behavioral-interview" && (
+              <div className="mt-4 p-4 border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-bold text-stone-950 dark:text-white">AI STAR Method Trainer</h4>
+                  <p className="text-xs text-stone-500">Practice your behavioral responses step-by-step and get instant AI-powered validation.</p>
+                </div>
+                <Link
+                  to="/learn/interview/behavioral-interview/trainer"
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-lime-500 hover:bg-lime-600 text-stone-950 font-semibold text-xs transition-colors shrink-0"
+                >
+                  Launch AI Trainer →
+                </Link>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 sm:gap-4 flex-wrap text-[10px] font-mono uppercase tracking-widest text-stone-500">
             <span>
@@ -147,24 +204,13 @@ export default function InterviewSectionPage() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
-          className="mb-8 px-5 py-4 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md"
+          className="mb-8"
         >
-          <div className="flex items-center justify-between gap-4 mb-2">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500">
-              {isLoading ? "syncing progress" : "section progress"}
-            </span>
-            <span className="text-xs font-mono uppercase tracking-widest text-stone-900 dark:text-stone-50 tabular-nums">
-              {completedCount} / {sectionQuestions.length}
-            </span>
-          </div>
-          <div className="w-full h-1 bg-stone-100 dark:bg-stone-800 overflow-hidden rounded-sm">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${pct}%` }}
-              transition={{ duration: 0.7, ease: "easeOut" }}
-              className="h-full bg-lime-400"
-            />
-          </div>
+          <ProgressBar
+            value={completedCount}
+            max={sectionQuestions.length}
+            label={isLoading ? "syncing progress" : "section progress"}
+          />
         </motion.div>
 
         {/* Section header */}
@@ -183,14 +229,85 @@ export default function InterviewSectionPage() {
           </span>
         </div>
 
+        {/* Controls Panel */}
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-8 bg-stone-50 dark:bg-stone-900/50 p-4 rounded-md border border-stone-200 dark:border-white/10">
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Difficulty Chips */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono uppercase tracking-widest text-stone-500">Difficulty</span>
+              <div className="flex gap-1 bg-white dark:bg-stone-950 p-1 rounded-md border border-stone-200 dark:border-white/10">
+                {["All", "Beginner", "Intermediate", "Advanced"].map((level) => (
+                  <Button
+                    key={level}
+                    variant="ghost"
+                    onClick={() => setActiveDifficulty(level)}
+                    className={`px-3 py-1.5 text-xs font-mono uppercase tracking-widest rounded-md transition-all cursor-pointer ${
+                      activeDifficulty === level
+                        ? "bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 shadow-sm"
+                        : "bg-transparent border-transparent shadow-none text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+                    }`}
+                  >
+                    {level}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="w-px h-6 bg-stone-300 dark:bg-stone-700 hidden sm:block" />
+
+            {/* Company Dropdown */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono uppercase tracking-widest text-stone-500">Company</span>
+              <EditorialDropdown
+                icon={<Building2 className="w-3.5 h-3.5" />}
+                label="company"
+                value={selectedCompany}
+                onChange={setSelectedCompany}
+                options={[
+                  { value: "All", label: "All Companies" },
+                  ...availableCompanies.map((company) => ({ value: company, label: company })),
+                ]}
+              />
+            </div>
+          </div>
+
+          {/* Sort Dropdown */}
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs font-mono uppercase tracking-widest text-stone-500">Sort</span>
+            <EditorialDropdown
+              icon={<ArrowUpDown className="w-3.5 h-3.5" />}
+              label="sort"
+              value={sortBy}
+              onChange={setSortBy}
+              options={[
+                { value: "frequency", label: "Most Frequent" },
+                { value: "order", label: "Curated Order" },
+              ]}
+            />
+          </div>
+        </div>
+
         {/* Question list */}
-        {sectionQuestions.length === 0 ? (
+        {filteredAndSortedQuestions.length === 0 ? (
           <div className="py-20 text-center border border-dashed border-stone-300 dark:border-white/10 rounded-md">
-            <p className="text-sm text-stone-600 dark:text-stone-400">No questions in this section yet.</p>
+            <p className="text-sm text-stone-600 dark:text-stone-400">
+              No questions match your filters.
+            </p>
+            {(activeDifficulty !== "All" || selectedCompany !== "All") && (
+              <button 
+                onClick={() => {
+                  setActiveDifficulty("All");
+                  setSelectedCompany("All");
+                }}
+                className="mt-2 text-xs font-mono uppercase tracking-widest text-lime-600 dark:text-lime-400 hover:underline cursor-pointer"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {sectionQuestions.map((question, i) => {
+            {filteredAndSortedQuestions.map((question, i) => {
               const isCompleted = completedIds.includes(question.id);
               return (
                 <motion.div

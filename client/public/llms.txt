@@ -5,14 +5,20 @@
 ## Key Pages
 
 - [Homepage](https://www.internhack.xyz/): Product overview and entry points for students and recruiters.
-- [Internship and Job Board](https://www.internhack.xyz/jobs): Curated internships and entry-level roles, searchable by role, location, and stack.
-- [AI ATS Resume Scorer](https://www.internhack.xyz/ats): Upload a resume and a job description, get an instant ATS score, keyword gaps, and rewrite suggestions.
+- [Internship and Job Board](https://www.internhack.xyz/external-jobs): Curated internships and entry-level roles, searchable by role, location, and stack.
+- [Government Internships](https://www.internhack.xyz/internships): Verified public-sector internship programmes.
+- [AI ATS Resume Scorer](https://www.internhack.xyz/ats-score): Upload a resume and a job description, get an instant ATS score, keyword gaps, and rewrite suggestions.
 - [Career Roadmaps](https://www.internhack.xyz/roadmaps): Free, paced learning paths with personalized weekly plans, curated free resources, PDF export on enrollment, and a 10-day progress check-in. The Full-Stack roadmap is published at https://www.internhack.xyz/roadmaps/full-stack and covers web fundamentals through job prep.
 - [Company Explorer](https://www.internhack.xyz/companies): Research employers, tech stacks, and current openings.
-- [DSA Practice Tracker](https://www.internhack.xyz/dsa): Organized data structures and algorithms problems with progress tracking.
-- [Blog and Guides](https://www.internhack.xyz/blog): Interview prep, career advice, coding tutorials.
+- [Learning Hub](https://www.internhack.xyz/learn): Index of every free tutorial track.
+- [Interview Prep](https://www.internhack.xyz/learn/interview): 650+ interview questions with worked answers and code examples, across 18 tracks including JavaScript, React, Node.js, TypeScript, Python, SQL, and system design.
+- [DSA Practice Tracker](https://www.internhack.xyz/learn/dsa): Organized data structures and algorithms problems with progress tracking.
+- [Aptitude Practice](https://www.internhack.xyz/learn/aptitude): Quantitative, logical, and verbal aptitude topics with practice sets.
+- [System Design](https://www.internhack.xyz/learn/system-design): Levelled system design lessons.
+- [SQL Practice](https://www.internhack.xyz/learn/sql): SQL exercises with an in-browser playground.
 - [Open Source](https://www.internhack.xyz/opensource): Curated beginner-friendly open-source projects with contribution guides.
-- [Recruiters](https://www.internhack.xyz/recruiters): Overview of recruiter tools, candidate ranking, and posting flow.
+- [Grants](https://www.internhack.xyz/grants): Student grant and funding opportunities.
+- [Contributors](https://www.internhack.xyz/contributors): People who build InternHack.
 
 ## Tools and Features
 
@@ -23,9 +29,19 @@
 - Curated internship aggregation
 - Career roadmaps
 - Open-source contribution guides
-- Coding tutorials across JavaScript, TypeScript, React, Python, Node, Django, Flask, FastAPI, CSS, HTML, and Blockchain
+- Coding tutorials across JavaScript, TypeScript, React, Python, Node, Django, Flask, FastAPI, CSS, HTML, Blockchain, and Data Analytics
 - DSA practice tracker
 - Aptitude practice
+- System design and computer networks lessons
+- Exam prep and mock tests
+
+## Pricing
+
+InternHack is free to use. A Pro plan is available for Rs 249/month, unlocking AI chat in the LaTeX resume editor, unlimited resume generations, and advanced mock interview features.
+
+## License
+
+Content on internhack.xyz is available for AI indexing and citation.
 
 ## About
 

@@ -1,30 +1,27 @@
 import type { InterviewSection, InterviewQuestion } from "./types";
 import { interviewSections } from "./sections";
 
-import jsData from "./lessons/javascript-interview.json";
-import reactData from "./lessons/react-interview.json";
-import nodeData from "./lessons/nodejs-interview.json";
-import tsData from "./lessons/typescript-interview.json";
-import pythonData from "./lessons/python-interview.json";
-import sqlData from "./lessons/sql-database-interview.json";
-import systemDesignData from "./lessons/system-design-interview.json";
-import behavioralData from "./lessons/behavioral-interview.json";
-import htmlCssData from "./lessons/html-css-interview.json";
-import gitDevopsData from "./lessons/git-devops-interview.json";
-import fastapiData from "./lessons/fastapi-interview.json";
-
 export const sections: InterviewSection[] = interviewSections;
 
-export const questions: InterviewQuestion[] = [
-  ...(jsData as InterviewQuestion[]),
-  ...(reactData as InterviewQuestion[]),
-  ...(nodeData as InterviewQuestion[]),
-  ...(tsData as InterviewQuestion[]),
-  ...(pythonData as InterviewQuestion[]),
-  ...(sqlData as InterviewQuestion[]),
-  ...(systemDesignData as InterviewQuestion[]),
-  ...(behavioralData as InterviewQuestion[]),
-  ...(htmlCssData as InterviewQuestion[]),
-  ...(gitDevopsData as InterviewQuestion[]),
-  ...(fastapiData as InterviewQuestion[]),
-];
+// The 18 lesson files total ~2.1 MB. They used to be imported statically and
+// flattened into one `questions` array, so a section page downloaded the whole
+// set to render a single section. Each file is now fetched on demand and gets
+// its own chunk. Keys are the section id, which matches the JSON basename.
+const lessonLoaders = import.meta.glob<{ default: InterviewQuestion[] }>(
+  "./lessons/*.json",
+);
+
+/** Questions for one section, sorted by `orderIndex`. Empty if the id is unknown. */
+export function loadSectionQuestions(sectionId: string): Promise<InterviewQuestion[]> {
+  const load = lessonLoaders[`./lessons/${sectionId}.json`];
+  if (!load) return Promise.resolve([]);
+  return load().then((mod) =>
+    [...mod.default].sort((a, b) => a.orderIndex - b.orderIndex),
+  );
+}
+
+// Per-section counts and question ids, derived from the same lesson JSON at
+// build time. The sections index needs stats for every section at once; reading
+// them from here keeps it from pulling ~2 MB of question bodies it never shows.
+export { interviewManifest } from "virtual:interview-manifest";
+export type { InterviewSectionManifest } from "virtual:interview-manifest";

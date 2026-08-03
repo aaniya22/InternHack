@@ -1,14 +1,36 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavLink, Outlet } from "react-router";
-import { LayoutDashboard, Users, Briefcase, AlertTriangle, Shield, LogOut, Building2, MessageSquare, GitPullRequest, Mail, BookOpen, Code2, Brain, BadgeCheck, Award, Cpu, ExternalLink, Menu, X, Radar, MessageCircle } from "lucide-react";
+import { LayoutDashboard, Users, AlertTriangle, Shield, LogOut, Building2, MessageSquare, GitPullRequest, Mail, Code2, Brain, BadgeCheck, Cpu, ExternalLink, Menu, X, Radar, MessageCircle, CalendarClock } from "lucide-react";
 import { useAuthStore } from "../../lib/auth.store";
 import { useNavigate } from "react-router";
 import { SEO } from "../../components/SEO";
+import api from "../../lib/axios";
+
+function NavBadge({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span className="ml-auto bg-red-500 text-white text-xs font-semibold rounded px-1.5 py-0.5 leading-none">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
 
 export default function AdminLayout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarStats, setSidebarStats] = useState({ pendingContributions: 0, recentErrors: 0 });
+
+  useEffect(() => {
+    const load = () => {
+      api.get<{ pendingContributions: number; recentErrors: number }>("/admin/sidebar-stats")
+        .then((r) => setSidebarStats(r.data))
+        .catch(() => {});
+    };
+    load();
+    const interval = setInterval(load, 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -47,13 +69,10 @@ export default function AdminLayout() {
           <Users className="w-4 h-4" />
           Users
         </NavLink>
-        <NavLink to="/admin/jobs" className={linkClass} onClick={() => setSidebarOpen(false)}>
-          <Briefcase className="w-4 h-4" />
-          Jobs
-        </NavLink>
         <NavLink to="/admin/errors" className={linkClass} onClick={() => setSidebarOpen(false)}>
           <AlertTriangle className="w-4 h-4" />
           Error Logs
+          <NavBadge count={sidebarStats.recentErrors} />
         </NavLink>
         <NavLink to="/admin/companies" className={linkClass} onClick={() => setSidebarOpen(false)}>
           <Building2 className="w-4 h-4" />
@@ -66,6 +85,7 @@ export default function AdminLayout() {
         <NavLink to="/admin/contributions" className={linkClass} onClick={() => setSidebarOpen(false)}>
           <GitPullRequest className="w-4 h-4" />
           Contributions
+          <NavBadge count={sidebarStats.pendingContributions} />
         </NavLink>
         <NavLink to="/admin/subscribers" className={linkClass} onClick={() => setSidebarOpen(false)}>
           <Mail className="w-4 h-4" />
@@ -82,10 +102,6 @@ export default function AdminLayout() {
         <NavLink to="/admin/skill-tests" className={linkClass} onClick={() => setSidebarOpen(false)}>
           <BadgeCheck className="w-4 h-4" />
           Skill Tests
-        </NavLink>
-        <NavLink to="/admin/badges" className={linkClass} onClick={() => setSidebarOpen(false)}>
-          <Award className="w-4 h-4" />
-          Badges
         </NavLink>
         <NavLink to="/admin/ai-providers" className={linkClass} onClick={() => setSidebarOpen(false)}>
           <Cpu className="w-4 h-4" />
@@ -107,13 +123,13 @@ export default function AdminLayout() {
           <MessageCircle className="w-4 h-4" />
           Interview Experiences
         </NavLink>
+        <NavLink to="/admin/expert-availability" className={linkClass} onClick={() => setSidebarOpen(false)}>
+          <CalendarClock className="w-4 h-4" />
+          Expert Availability
+        </NavLink>
         <NavLink to="/admin/broadcast-email" className={linkClass} onClick={() => setSidebarOpen(false)}>
           <Mail className="w-4 h-4" />
           Broadcast Email
-        </NavLink>
-        <NavLink to="/admin/blog" className={linkClass} onClick={() => setSidebarOpen(false)}>
-          <BookOpen className="w-4 h-4" />
-          Blog
         </NavLink>
       </nav>
 

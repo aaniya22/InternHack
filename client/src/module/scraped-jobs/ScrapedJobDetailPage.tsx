@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { Navbar } from "../../components/Navbar";
 import { SEO } from "../../components/SEO";
+import { canonicalUrl, SITE_URL } from "../../lib/seo.utils";
+import { breadcrumbSchema } from "../../lib/structured-data";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { Button } from "../../components/ui/button";
 import { queryKeys } from "../../lib/query-keys";
@@ -120,10 +122,21 @@ export default function ScrapedJobDetailPage() {
 
   return (
     <div className="min-h-screen bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-50">
+      {/* No canonical was set here, so these pages self-canonicalized to the
+          homepage in the pre-JS HTML. Deliberately no JobPosting markup: these
+          are third-party listings whose authoritative source is another site
+          (job.sourceUrl), and Google's job posting policy expects the marked-up
+          page to be the original. Breadcrumb only. */}
       <SEO
         title={`${job.title} at ${job.company}`}
         description={`${job.title} at ${job.company} in ${job.location}. Found on ${job.source}. Apply now on InternHack.`}
-        keywords={`${job.title}, ${job.company}, ${job.location}, ${job.source}, job listing`}
+        canonicalUrl={canonicalUrl(`/external-jobs/${job.id}`)}
+        ogType="article"
+        structuredData={breadcrumbSchema([
+          { name: "Home", url: SITE_URL },
+          { name: "External Jobs", url: `${SITE_URL}/external-jobs` },
+          { name: `${job.title} at ${job.company}`, url: `${SITE_URL}/external-jobs/${job.id}` },
+        ])}
       />
       <Navbar />
       <div className="max-w-4xl mx-auto px-6 pt-24 pb-12">

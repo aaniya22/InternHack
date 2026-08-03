@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Link, useLocation } from "react-router";
 import {
   Search,
   ExternalLink,
@@ -18,11 +19,20 @@ import {
   Bookmark,
   BookmarkCheck,
   ClipboardList,
+  Clock,
+  Activity,
+  Crown,
 } from "lucide-react";
 import { grants, GRANT_CATEGORIES, type Grant, type GrantCategory } from "./grantsData";
 import { SEO } from "../../../components/SEO";
 import { canonicalUrl } from "../../../lib/seo.utils";
-import { Link } from "react-router";
+import { GridBackground } from "../../../components/ui/GridBackground";
+import GrantTrackerDialog from "./GrantTrackerDialog";
+import { FilterChip } from "../../../components/ui/FilterChip";
+import { EditorialDropdown } from "../../../components/ui/EditorialDropdown";
+import { Navbar } from "../../../components/Navbar";
+import { useAuthStore } from "../../../lib/auth.store";
+
 
 function resolveGrantLogo(logo: string, website: string): string {
   if (logo && !logo.includes("placehold.co")) return logo;
@@ -37,10 +47,84 @@ function resolveGrantLogo(logo: string, website: string): string {
 const STATUS_CONFIG = {
   Active:        { icon: CheckCircle2, color: "text-lime-600 dark:text-lime-400",     border: "border-lime-300 dark:border-lime-900/60" },
   Paused:        { icon: AlertCircle,  color: "text-amber-600 dark:text-amber-400",   border: "border-amber-300 dark:border-amber-900/60" },
-  "Invite Only": { icon: Lock,         color: "text-violet-600 dark:text-violet-400", border: "border-violet-300 dark:border-violet-900/60" },
+  "Invite Only": { icon: Lock,         color: "text-stone-600 dark:text-stone-300", border: "border-stone-300 dark:border-stone-700" },
 };
 
 const ECOSYSTEMS = Array.from(new Set(grants.map((g) => g.ecosystem))).sort();
+// Derived from static data — computed once at module level, never recomputed
+const ACTIVE_COUNT = grants.filter((g) => g.status === "Active").length;
+
+function getDeadlineCountdown(deadline?: string | null) {
+  if (!deadline) return null;
+
+  const deadlineDate = new Date(deadline);
+  if (Number.isNaN(deadlineDate.getTime())) return null;
+
+  const now = new Date();
+  const utcToday = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const utcDeadline = Date.UTC(deadlineDate.getFullYear(), deadlineDate.getMonth(), deadlineDate.getDate());
+  const daysRemaining = Math.floor((utcDeadline - utcToday) / 86400000);
+
+  if (daysRemaining < 0) return "Expired";
+  if (daysRemaining === 0) return "Ends today";
+  if (daysRemaining === 1) return "1 day left";
+  return `${daysRemaining} days left`;
+}
+
+function getDeadlineBadge(deadline: string) {
+  const now = new Date();
+  const endDate = new Date(deadline);
+
+  const utcNow = Date.UTC(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+
+  const utcDeadline = Date.UTC(
+    endDate.getFullYear(),
+    endDate.getMonth(),
+    endDate.getDate()
+  );
+
+  const diffTime = utcDeadline - utcNow;
+
+  const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  if (daysLeft < 0) {
+    return {
+      text: "Closed",
+      className:
+        "bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400",
+      isClosed: true,
+    };
+  }
+
+  if (daysLeft < 7) {
+    return {
+      text: `${daysLeft} days left — Closing soon`,
+      className:
+        "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300",
+      isClosed: false,
+    };
+  }
+
+  if (daysLeft <= 30) {
+    return {
+      text: `${daysLeft} days left`,
+      className:
+        "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+      isClosed: false,
+    };
+  }
+
+  return {
+    text: `${daysLeft} days left`,
+    className:
+      "bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300",
+    isClosed: false,
+  };
+}
 
 function MetaChip({ icon, children, className = "" }: { icon?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
@@ -51,13 +135,29 @@ function MetaChip({ icon, children, className = "" }: { icon?: React.ReactNode; 
   );
 }
 
+const FREE_GRANT_LIMIT = 50;
+const TEASER_PREVIEW_COUNT = 6;
+
 export default function GrantsPage() {
+  const location = useLocation();
+  // /grants is public (no layout chrome); /student/grants is nested inside
+  // StudentLayout, which already renders the sidebar nav.
+  const isPublicRoute = location.pathname === "/grants";
+
+  const { user } = useAuthStore();
+  const isPremium =
+    user?.subscriptionStatus === "ACTIVE" &&
+    user?.subscriptionPlan !== "FREE" &&
+    !!user?.subscriptionEndDate &&
+    new Date(user.subscriptionEndDate) > new Date();
+
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<GrantCategory | "ALL">("ALL");
   const [selectedEcosystem, setSelectedEcosystem] = useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [selectedGrant, setSelectedGrant] = useState<Grant | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [showTracker, setShowTracker] = useState(false);
   const [savedGrants, setSavedGrants] = useState<Set<number>>(() => {
     try {
       const stored = localStorage.getItem("savedGrants");
@@ -68,7 +168,7 @@ export default function GrantsPage() {
   });
   const [showSavedOnly, setShowSavedOnly] = useState(false);
 
-  const toggleSave = (grantId: number) => {
+  const toggleSave = useCallback((grantId: number) => {
     setSavedGrants((prev) => {
       const next = new Set(prev);
       if (next.has(grantId)) next.delete(grantId);
@@ -76,7 +176,11 @@ export default function GrantsPage() {
       localStorage.setItem("savedGrants", JSON.stringify([...next]));
       return next;
     });
-  };
+  }, []);
+
+  // Stable callbacks passed into memo'd GrantCard — never recreated between renders
+  const handleCardSelect = useCallback((grant: Grant) => setSelectedGrant(grant), []);
+  const handleCloseModal = useCallback(() => setSelectedGrant(null), []);
 
   const filtered = useMemo(() => {
     let result = grants.filter((g) => {
@@ -104,6 +208,10 @@ export default function GrantsPage() {
     return result;
   }, [search, selectedCategory, selectedEcosystem, selectedStatus, showSavedOnly, savedGrants]);
 
+  const visibleGrants = isPremium ? filtered : filtered.slice(0, FREE_GRANT_LIMIT);
+  const lockedGrants = isPremium ? [] : filtered.slice(FREE_GRANT_LIMIT);
+  const noop = useCallback(() => {}, []);
+
   const activeFilters =
     (selectedEcosystem !== "ALL" ? 1 : 0) +
     (selectedStatus !== "ALL" ? 1 : 0);
@@ -115,27 +223,20 @@ export default function GrantsPage() {
     setSearch("");
   };
 
-  const activeCount = grants.filter((g) => g.status === "Active").length;
-
   return (
     <div className="relative text-stone-900 dark:text-stone-50 pb-12">
       <SEO
-        title="Grants & Funding for Students"
-        description="Discover grants, scholarships, and funding opportunities for students. Browse tech grants, research funding, and startup grants."
-        keywords="student grants, tech scholarships, research funding, startup grants, student funding"
+        title="Startup Grants & Non-Dilutive Funding"
+        description="Find non-dilutive grants, government schemes, and accelerator programs for startups. Browse seed funding, deep-tech grants, and founder programs worldwide."
+        keywords="startup grants, non-dilutive funding, government startup schemes, accelerator programs, seed funding, founder grants"
         canonicalUrl={canonicalUrl("/grants")}
       />
 
-      <div
-        aria-hidden
-        className="absolute inset-0 pointer-events-none opacity-[0.04] dark:opacity-[0.05] z-0"
-        style={{
-          backgroundImage: "linear-gradient(to right, rgba(120,113,108,0.25) 1px, transparent 1px)",
-          backgroundSize: "120px 100%",
-        }}
-      />
+      {isPublicRoute && <Navbar />}
 
-      <div className="relative max-w-6xl mx-auto">
+      <GridBackground />
+
+      <div className={`relative max-w-6xl mx-auto ${isPublicRoute ? "pt-24" : ""}`}>
         {/* Editorial header */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -146,12 +247,12 @@ export default function GrantsPage() {
           <div>
             <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-stone-500">
               <span className="h-1.5 w-1.5 bg-lime-400" />
-              student / grants
+              startup / grants
             </div>
             <h1 className="mt-4 text-4xl sm:text-5xl font-bold tracking-tight text-stone-900 dark:text-stone-50 leading-none">
               Fund your{" "}
               <span className="relative inline-block">
-                <span className="relative z-10">work.</span>
+                <span className="relative z-10">startup.</span>
                 <motion.span
                   initial={{ scaleX: 0 }}
                   animate={{ scaleX: 1 }}
@@ -162,7 +263,7 @@ export default function GrantsPage() {
               </span>
             </h1>
             <p className="mt-3 text-sm text-stone-500 max-w-md">
-              Grants, scholarships, and funding across Web3, government, research, climate, and AI, curated for student builders.
+              Non-dilutive grants, government schemes, and accelerator programs for founders, across deep tech, climate, Web3, and more.
             </p>
           </div>
           <div className="flex items-center gap-4 text-[10px] font-mono uppercase tracking-widest text-stone-500">
@@ -175,7 +276,7 @@ export default function GrantsPage() {
             <span>
               active
               <span className="text-stone-900 dark:text-stone-50 text-sm font-bold tabular-nums ml-2">
-                {activeCount}
+                {ACTIVE_COUNT}
               </span>
             </span>
             <span>
@@ -194,9 +295,10 @@ export default function GrantsPage() {
           transition={{ delay: 0.05 }}
           className="mb-6"
         >
-          <Link
-            to="/student/grants/tracker"
-            className="group flex items-center gap-4 px-5 py-4 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md hover:border-stone-400 dark:hover:border-white/30 transition-colors no-underline"
+          <button
+            type="button"
+            onClick={() => setShowTracker(true)}
+            className="group w-full flex items-center gap-4 px-5 py-4 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md hover:border-stone-400 dark:hover:border-white/30 transition-colors text-left cursor-pointer"
           >
             <div className="w-9 h-9 rounded-md bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-white/10 flex items-center justify-center shrink-0">
               <ClipboardList className="w-4 h-4 text-stone-600 dark:text-stone-400" />
@@ -210,7 +312,7 @@ export default function GrantsPage() {
               </p>
             </div>
             <ArrowUpRight className="w-4 h-4 text-stone-400 group-hover:text-lime-500 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 transition-all shrink-0" />
-          </Link>
+          </button>
         </motion.div>
 
         {/* Search + filters */}
@@ -238,24 +340,22 @@ export default function GrantsPage() {
             {(["ALL", ...GRANT_CATEGORIES] as const).map((cat, i) => {
               const active = selectedCategory === cat;
               return (
-                <motion.button
+                <motion.div
                   key={cat}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.02, duration: 0.2 }}
-                  onClick={() =>
-                    setSelectedCategory(
-                      cat === "ALL" ? "ALL" : cat === selectedCategory ? "ALL" : cat,
-                    )
-                  }
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
-                    active
-                      ? "bg-stone-900 dark:bg-stone-50 text-stone-50 dark:text-stone-900 border-stone-900 dark:border-stone-50"
-                      : "bg-transparent text-stone-600 dark:text-stone-400 border-stone-300 dark:border-white/10 hover:border-stone-500 dark:hover:border-white/30 hover:text-stone-900 dark:hover:text-stone-50"
-                  }`}
                 >
-                  {cat === "ALL" ? "All" : cat}
-                </motion.button>
+                  <FilterChip
+                    label={cat === "ALL" ? "All" : cat}
+                    active={active}
+                    onClick={() =>
+                      setSelectedCategory(
+                        cat === "ALL" ? "ALL" : cat === selectedCategory ? "ALL" : cat,
+                      )
+                    }
+                  />
+                </motion.div>
               );
             })}
           </div>
@@ -318,38 +418,28 @@ export default function GrantsPage() {
                 className="overflow-hidden"
               >
                 <div className="flex flex-wrap gap-4 p-4 bg-white dark:bg-stone-900 rounded-md border border-stone-200 dark:border-white/10">
-                  <div>
-                    <label className="text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2 block">
-                      ecosystem
-                    </label>
-                    <select
-                      value={selectedEcosystem}
-                      onChange={(e) => setSelectedEcosystem(e.target.value)}
-                      className="px-3 py-2 rounded-md text-sm border border-stone-300 dark:border-white/10 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-50 focus:outline-none focus:border-lime-400 transition-colors"
-                    >
-                      <option value="ALL">All ecosystems</option>
-                      {ECOSYSTEMS.map((eco) => (
-                        <option key={eco} value={eco}>
-                          {eco}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2 block">
-                      status
-                    </label>
-                    <select
-                      value={selectedStatus}
-                      onChange={(e) => setSelectedStatus(e.target.value)}
-                      className="px-3 py-2 rounded-md text-sm border border-stone-300 dark:border-white/10 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-50 focus:outline-none focus:border-lime-400 transition-colors"
-                    >
-                      <option value="ALL">All statuses</option>
-                      <option value="Active">Active</option>
-                      <option value="Paused">Paused</option>
-                      <option value="Invite Only">Invite Only</option>
-                    </select>
-                  </div>
+                  <EditorialDropdown
+                    icon={<Globe className="w-3.5 h-3.5" />}
+                    label="ecosystem"
+                    value={selectedEcosystem}
+                    onChange={setSelectedEcosystem}
+                    options={[
+                      { value: "ALL", label: "All ecosystems" },
+                      ...ECOSYSTEMS.map((eco) => ({ value: eco, label: eco })),
+                    ]}
+                  />
+                  <EditorialDropdown
+                    icon={<Activity className="w-3.5 h-3.5" />}
+                    label="status"
+                    value={selectedStatus}
+                    onChange={setSelectedStatus}
+                    options={[
+                      { value: "ALL", label: "All statuses" },
+                      { value: "Active", label: "Active" },
+                      { value: "Paused", label: "Paused" },
+                      { value: "Invite Only", label: "Invite Only" },
+                    ]}
+                  />
                 </div>
               </motion.div>
             )}
@@ -387,46 +477,89 @@ export default function GrantsPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filtered.map((grant, i) => (
-              <GrantCard
-                key={grant.id}
-                grant={grant}
-                index={i}
-                onClick={() => setSelectedGrant(grant)}
-                saved={savedGrants.has(grant.id)}
-                onToggleSave={() => toggleSave(grant.id)}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {visibleGrants.map((grant, i) => (
+                <GrantCard
+                  key={grant.id}
+                  grant={grant}
+                  index={i}
+                  onSelect={handleCardSelect}
+                  saved={savedGrants.has(grant.id)}
+                  onToggleSave={toggleSave}
+                />
+              ))}
+            </div>
+
+            {lockedGrants.length > 0 && (
+              <div className="relative mt-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 blur-sm opacity-60 select-none pointer-events-none">
+                  {lockedGrants.slice(0, TEASER_PREVIEW_COUNT).map((grant, i) => (
+                    <GrantCard
+                      key={grant.id}
+                      grant={grant}
+                      index={i}
+                      onSelect={noop}
+                      saved={false}
+                      onToggleSave={noop}
+                    />
+                  ))}
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-transparent via-stone-50/80 to-stone-50 dark:via-stone-950/80 dark:to-stone-950">
+                  <Link
+                    to="/student/checkout"
+                    className="flex items-center gap-3 px-6 py-4 rounded-md border border-lime-300 dark:border-lime-800 bg-white dark:bg-stone-900 shadow-lg no-underline hover:border-lime-400 dark:hover:border-lime-700 transition-colors"
+                  >
+                    <Crown className="w-5 h-5 text-lime-600 dark:text-lime-400 shrink-0" />
+                    <div>
+                      <p className="text-sm font-bold text-stone-900 dark:text-stone-50">
+                        Unlock {lockedGrants.length} more grant{lockedGrants.length === 1 ? "" : "s"}
+                      </p>
+                      <p className="text-xs text-stone-500">
+                        Upgrade to Premium to see the full catalog
+                      </p>
+                    </div>
+                  </Link>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
       <AnimatePresence>
         {selectedGrant && (
-          <GrantDetailModal grant={selectedGrant} onClose={() => setSelectedGrant(null)} />
+          <GrantDetailModal grant={selectedGrant} onClose={handleCloseModal} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showTracker && (
+          <GrantTrackerDialog onClose={() => setShowTracker(false)} />
         )}
       </AnimatePresence>
     </div>
   );
 }
 
-function GrantCard({
+const GrantCard = memo(function GrantCard({
   grant,
   index,
-  onClick,
+  onSelect,
   saved,
   onToggleSave,
 }: {
   grant: Grant;
   index: number;
-  onClick: () => void;
+  onSelect: (grant: Grant) => void;
   saved: boolean;
-  onToggleSave: () => void;
+  onToggleSave: (id: number) => void;
 }) {
   const statusCfg = STATUS_CONFIG[grant.status];
   const StatusIcon = statusCfg.icon;
   const logoSrc = resolveGrantLogo(grant.logo, grant.website);
+  const countdown = getDeadlineCountdown(grant.deadline);
+  const deadlineBadge = getDeadlineBadge(grant.deadline);
 
   return (
     <motion.div
@@ -435,14 +568,16 @@ function GrantCard({
       transition={{ delay: index * 0.03 }}
     >
       <div
-        onClick={onClick}
-        className="group relative flex flex-col bg-white dark:bg-stone-900 p-5 rounded-md border border-stone-200 dark:border-white/10 hover:border-stone-400 dark:hover:border-white/30 transition-colors h-full cursor-pointer"
+        onClick={() => onSelect(grant)}
+        className={`group relative flex flex-col bg-white dark:bg-stone-900 p-5 rounded-md border border-stone-200 dark:border-white/10 hover:border-stone-400 dark:hover:border-white/30 transition-colors h-full cursor-pointer ${
+  deadlineBadge.isClosed ? "opacity-60" : ""
+}`}
       >
         <span
           role="button"
           onClick={(e) => {
             e.stopPropagation();
-            onToggleSave();
+            onToggleSave(grant.id);
           }}
           className="absolute top-4 right-4 p-1 rounded hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
         >
@@ -490,9 +625,22 @@ function GrantCard({
           >
             {grant.status}
           </MetaChip>
+          {countdown && (
+            <MetaChip
+              icon={<Clock className="w-3 h-3" />}
+              className="text-stone-700 dark:text-stone-200 border-stone-200 dark:border-white/10 bg-stone-100 dark:bg-stone-800"
+            >
+              {countdown}
+            </MetaChip>
+          )}
           <MetaChip icon={<DollarSign className="w-3 h-3" />}>{grant.fundingAmount}</MetaChip>
           <MetaChip icon={<Globe className="w-3 h-3" />}>{grant.ecosystem}</MetaChip>
           <MetaChip icon={<Tag className="w-3 h-3" />}>{grant.category}</MetaChip>
+          <span
+  className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider ${deadlineBadge.className}`}
+          >
+            {deadlineBadge.text}
+          </span>
         </div>
 
         <div className="mt-auto flex items-center justify-between pt-3 border-t border-stone-100 dark:border-white/5">
@@ -504,12 +652,13 @@ function GrantCard({
       </div>
     </motion.div>
   );
-}
+});
 
 function GrantDetailModal({ grant, onClose }: { grant: Grant; onClose: () => void }) {
   const statusCfg = STATUS_CONFIG[grant.status];
   const StatusIcon = statusCfg.icon;
   const logoSrc = resolveGrantLogo(grant.logo, grant.website);
+  const deadlineBadge = getDeadlineBadge(grant.deadline);
 
   return (
     <motion.div
@@ -572,6 +721,11 @@ function GrantDetailModal({ grant, onClose }: { grant: Grant; onClose: () => voi
             <MetaChip icon={<DollarSign className="w-3 h-3" />}>{grant.fundingAmount}</MetaChip>
             <MetaChip icon={<Globe className="w-3 h-3" />}>{grant.ecosystem}</MetaChip>
             <MetaChip icon={<Tag className="w-3 h-3" />}>{grant.category}</MetaChip>
+            <span
+            className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-mono tracking-wider ${deadlineBadge.className}`}
+          >
+            {deadlineBadge.text}
+          </span>
           </div>
 
           <div>

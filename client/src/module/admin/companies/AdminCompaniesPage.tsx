@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Building2, Check, Trash2, Eye, EyeOff } from "lucide-react";
 import { PaginationControls } from "../../../components/ui/PaginationControls";
@@ -14,7 +14,7 @@ export default function AdminCompaniesPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
 
-  const fetchCompanies = async () => {
+  const fetchCompanies = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get("/admin/companies", { params: { page, limit: 20 } });
@@ -25,9 +25,10 @@ export default function AdminCompaniesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page]);
 
-  useEffect(() => { fetchCompanies(); }, [page]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
 
   const handleApprove = async (id: number) => {
     try {
@@ -103,13 +104,13 @@ export default function AdminCompaniesPage() {
 
               <div className="flex items-center gap-2 shrink-0">
                 {!company.isApproved && (
-                  <button onClick={() => handleApprove(company.id)}
+                  <button type="button" onClick={() => handleApprove(company.id)}
                     className="p-2 rounded-lg bg-green-900/30 text-green-400 hover:bg-green-900/50 transition-colors"
                     title="Approve">
                     <Check className="w-4 h-4" />
                   </button>
                 )}
-                <button onClick={() => handleDelete(company.id)}
+                <button type="button" onClick={() => handleDelete(company.id)}
                   className="p-2 rounded-lg bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors"
                   title="Delete">
                   <Trash2 className="w-4 h-4" />

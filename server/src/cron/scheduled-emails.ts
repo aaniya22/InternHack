@@ -1,7 +1,9 @@
 import cron from "node-cron";
 import { prisma } from "../database/db.js";
 import { sendEmail } from "../utils/email.utils.js";
+import { buildUnsubscribeUrl } from "../utils/unsubscribe.utils.js";
 import { followUpEmailHtml } from "../utils/email-templates.js";
+import { withAdvisoryLock } from "../utils/cron-lock.js";
 
 let cronJob: cron.ScheduledTask | null = null;
 
@@ -10,7 +12,7 @@ let cronJob: cron.ScheduledTask | null = null;
  * between 10 and 11 days ago. The 24-hour window ensures each user
  * is picked up exactly once when the cron runs daily.
  */
-async function sendFollowUpEmails(): Promise<void> {
+export async function runFollowUpEmails(): Promise<void> {
   const now = new Date();
   const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
   const elevenDaysAgo = new Date(now.getTime() - 11 * 24 * 60 * 60 * 1000);
@@ -19,6 +21,7 @@ async function sendFollowUpEmails(): Promise<void> {
     where: {
       isVerified: true,
       isActive: true,
+      unsubscribeDigest: false,
       createdAt: { gte: elevenDaysAgo, lt: tenDaysAgo },
     },
     select: { id: true, name: true, email: true },
@@ -33,6 +36,7 @@ async function sendFollowUpEmails(): Promise<void> {
       to: user.email,
       subject: `${user.name.split(" ")[0]}, how's InternHack treating you?`,
       html: followUpEmailHtml(user.name),
+      unsubscribeUrl: buildUnsubscribeUrl(user.id),
     }).catch((err) =>
       console.error(`[FollowUpCron] Failed to send to ${user.email}:`, err)
     );
@@ -43,7 +47,18 @@ async function sendFollowUpEmails(): Promise<void> {
 export function startFollowUpCron(schedule = "0 9 * * *"): void {
   if (cronJob) return;
   cronJob = cron.schedule(schedule, () => {
-    void sendFollowUpEmails();
+    void withAdvisoryLock("scheduled-emails-followup", async () => {
+      await runFollowUpEmails();
+    });
   });
   console.log(`[FollowUpCron] Scheduled daily at "${schedule}"`);
+}
+
+/** Stop the follow-up email cron (used during graceful shutdown). */
+export function stopFollowUpCron(): void {
+  if (cronJob) {
+    cronJob.stop();
+    cronJob = null;
+    console.log("[FollowUpCron] Cron stopped");
+  }
 }

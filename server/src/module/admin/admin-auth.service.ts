@@ -1,7 +1,6 @@
 import { prisma } from "../../database/db.js";
 import { hashPassword, comparePassword } from "../../utils/password.utils.js";
 import { generateToken } from "../../utils/jwt.utils.js";
-import { invalidateVersionCache } from "../../middleware/auth.middleware.js";
 import type { AdminTier } from "@prisma/client";
 
 export class AdminAuthService {
@@ -20,19 +19,11 @@ export class AdminAuthService {
     if (!adminProfile || !adminProfile.isActive)
       throw new Error("Admin account is inactive");
 
-    // Increment tokenVersion to invalidate all previous sessions (single-device enforcement)
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: { tokenVersion: { increment: 1 } },
-      select: { tokenVersion: true },
-    });
-    invalidateVersionCache(user.id);
-
     const token = generateToken({
       id: user.id,
       email: user.email,
       role: user.role,
-      tokenVersion: updatedUser.tokenVersion,
+      tokenVersion: user.tokenVersion,
     });
 
     return {
@@ -67,27 +58,31 @@ export class AdminAuthService {
 
     const hashedPassword = await hashPassword(data.password);
 
-    const user = await prisma.user.create({
-      data: {
-        name: data.name,
-        email: data.email,
-        password: hashedPassword,
-        role: "ADMIN",
-      },
+    const result = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          name: data.name,
+          email: data.email,
+          password: hashedPassword,
+          role: "ADMIN",
+        },
+      });
+
+      const adminProfile = await tx.adminProfile.create({
+        data: { userId: user.id, tier: data.tier },
+      });
+
+      return {
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        },
+        adminProfile: { tier: adminProfile.tier },
+      };
     });
 
-    const adminProfile = await prisma.adminProfile.create({
-      data: { userId: user.id, tier: data.tier },
-    });
-
-    return {
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      adminProfile: { tier: adminProfile.tier },
-    };
+    return result;
   }
 }

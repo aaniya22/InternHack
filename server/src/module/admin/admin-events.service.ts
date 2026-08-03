@@ -1,7 +1,9 @@
 import { prisma } from "../../database/db.js";
 import { sendEmail, sendEmailBatch, emailSleep } from "../../utils/email.utils.js";
+import { buildUnsubscribeUrl } from "../../utils/unsubscribe.utils.js";
 import { switchServiceProvider } from "../../lib/ai-provider-registry.js";
 import { slugifyWithSuffix } from "../../utils/slug.utils.js";
+import { submitPathToIndexNow } from "../../utils/indexnow.utils.js";
 import type { Prisma, UserRole, AIServiceType, AIProviderType } from "@prisma/client";
 
 export class AdminEventsService {
@@ -136,7 +138,7 @@ export class AdminEventsService {
   async sendBroadcastEmail(input: {
     subject: string;
     body: string;
-    filter: { role: "STUDENT" | "RECRUITER" | "ADMIN" | "ALL"; isVerified?: boolean | undefined; subscriptionPlan: "FREE" | "MONTHLY" | "YEARLY" | "ALL" };
+    filter: { role: "STUDENT" | "ADMIN" | "ALL"; isVerified?: boolean | undefined; subscriptionPlan: "FREE" | "MONTHLY" | "YEARLY" | "ALL" };
     testEmail?: string | undefined;
     adminId: number;
   }) {
@@ -154,14 +156,14 @@ export class AdminEventsService {
       return { test: true, sent: 1, failed: 0, recipients: 1 };
     }
 
-    const where: Prisma.userWhereInput = { isActive: true };
+    const where: Prisma.userWhereInput = { isActive: true, unsubscribeDigest: false };
     if (input.filter.role !== "ALL") where.role = input.filter.role as UserRole;
     if (typeof input.filter.isVerified === "boolean") where.isVerified = input.filter.isVerified;
     if (input.filter.subscriptionPlan !== "ALL") {
       where.subscriptionPlan = input.filter.subscriptionPlan as Prisma.userWhereInput["subscriptionPlan"];
     }
 
-    const users = await prisma.user.findMany({ where, select: { email: true, name: true } });
+    const users = await prisma.user.findMany({ where, select: { id: true, email: true, name: true } });
 
     const personalize = (template: string, name: string | null, email: string) => {
       const username = (name && name.trim()) || (email.split("@")[0] ?? "there");
@@ -184,6 +186,7 @@ export class AdminEventsService {
         to: u.email,
         subject: personalize(input.subject, u.name, u.email),
         html: personalize(html, u.name, u.email),
+        unsubscribeUrl: buildUnsubscribeUrl(u.id),
       }));
       const result = await sendEmailBatch(payload);
       sent += result.sent;
@@ -205,8 +208,7 @@ export class AdminEventsService {
       GEMINI: !!process.env["GEMINI_API_KEY"],
       GROQ: !!process.env["GROQ_API_KEY"],
       OPENROUTER: !!process.env["OPENROUTER_API_KEY"],
-      CODESTRAL: !!process.env["CODESTRAL_API_KEY"],
-      CLAUDE: !!process.env["CLAUDE_API"],
+      CODESTRAL: !!process.env["CODESTRAL_API_KEY"]
     };
 
     return { configs, envStatus };
@@ -276,7 +278,7 @@ export class AdminEventsService {
   }) {
     const expiresAt = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000); // 10 days
     const slug = slugifyWithSuffix([data.company, data.role].filter(Boolean).join(" "), "job");
-    return prisma.adminJob.create({
+    const job = await prisma.adminJob.create({
       data: {
         slug,
         company: data.company || null,
@@ -289,6 +291,13 @@ export class AdminEventsService {
         expiresAt,
       },
     });
+
+    // Postings expire in 10 days, so waiting for an organic crawl wastes most of
+    // the listing's life. Fire and forget: IndexNow must never block the admin
+    // response or fail the create.
+    void submitPathToIndexNow(`/jobs/ext/${slug}`);
+
+    return job;
   }
 
   async listExternalJobs(query: { page: number; limit: number; search?: string }) {
@@ -314,13 +323,19 @@ export class AdminEventsService {
   async updateExternalJob(id: number, data: Record<string, unknown>) {
     const job = await prisma.adminJob.findUnique({ where: { id } });
     if (!job) throw new Error("Job not found");
-    return prisma.adminJob.update({ where: { id }, data });
+    const updated = await prisma.adminJob.update({ where: { id }, data });
+    if (updated.slug) void submitPathToIndexNow(`/jobs/ext/${updated.slug}`);
+    return updated;
   }
 
   async deleteExternalJob(id: number) {
     const job = await prisma.adminJob.findUnique({ where: { id } });
     if (!job) throw new Error("Job not found");
-    return prisma.adminJob.delete({ where: { id } });
+    const deleted = await prisma.adminJob.delete({ where: { id } });
+    // Also worth submitting: it prompts a recrawl that discovers the 404 and
+    // drops the posting from results instead of serving a dead listing.
+    if (job.slug) void submitPathToIndexNow(`/jobs/ext/${job.slug}`);
+    return deleted;
   }
 
   async getPublicExternalJobs(query: { page: number; limit: number; search?: string; location?: string; tags?: string }) {
