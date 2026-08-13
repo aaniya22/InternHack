@@ -38,6 +38,8 @@ export function normalizeProfile(profile: ExtensionProfile): NormalizedProfile {
     skills: profile.user.skills.join(", "),
     resumeUrl: profile.user.resumes[0] || "",
     bio: profile.user.bio || "",
+    // Filled in by the panel once the user generates a letter for this job.
+    coverLetter: "",
     customFields,
   };
 }

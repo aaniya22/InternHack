@@ -304,7 +304,6 @@ export default function ExpertSessionPage() {
               <ArrowLeft className="w-4 h-4" />
             </Button>
           </div>
-
           {/* Step progress */}
           {step !== "confirmed" && (
             <div className="mb-6 flex items-center gap-2">
@@ -673,7 +672,7 @@ export default function ExpertSessionPage() {
               </motion.div>
             )}
           </AnimatePresence>
-
+          
           {/* My sessions */}
           {mySessions && mySessions.length > 0 && step !== "confirmed" && (
             <div className="mt-8">
@@ -692,7 +691,7 @@ export default function ExpertSessionPage() {
                       {formatSlotDay(s.scheduledAt)} &middot; {formatSlotTime(s.scheduledAt)} IST
                     </div>
                     <span
-                      className={`text-xs font-mono uppercase tracking-widest px-2 py-0.5 rounded ${
+                      className={`text-xs font-mono uppercase tracking-widest px-2 py-0.5 rounded shrink-0 ${
                         s.status === "SCHEDULED"
                           ? "bg-lime-400/10 text-lime-600 dark:text-lime-400"
                           : s.status === "COMPLETED"

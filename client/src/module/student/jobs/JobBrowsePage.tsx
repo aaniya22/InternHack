@@ -58,11 +58,7 @@ const ExternalJobCard = React.memo(function ExternalJobCard({ job }: { job: Exte
   const SalaryIcon = salaryHasCurrency ? Wallet : IndianRupee;
   return (
     <Link to={job.slug ? `/jobs/ext/${job.slug}` : "#"} className={CARD_BASE}>
-      <span className="absolute top-4 right-4 text-[10px] font-mono uppercase tracking-widest text-stone-500 inline-flex items-center gap-1.5">
-        <span className="h-1 w-1 bg-lime-400" />
-        external
-      </span>
-      <div className="flex items-start gap-3 mb-3 pr-16">
+      <div className="flex items-start gap-3 mb-3">
         <CompanyMark name={job.company || "?"} />
         <div className="flex-1 min-w-0">
           <h3 className="text-base font-bold tracking-tight text-stone-900 dark:text-stone-50 line-clamp-1 leading-tight">
@@ -96,11 +92,7 @@ const ScrapedJobCard = React.memo(function ScrapedJobCard({ job }: { job: Scrape
   const SalaryIcon = salaryHasCurrency ? Wallet : IndianRupee;
   return (
     <a href={job.applicationUrl} target="_blank" rel="noopener noreferrer" className={CARD_BASE}>
-      <span className="absolute top-4 right-4 text-[10px] font-mono uppercase tracking-widest text-stone-500 inline-flex items-center gap-1.5">
-        <span className="h-1 w-1 bg-lime-400" />
-        {job.source}
-      </span>
-      <div className="flex items-start gap-3 mb-3 pr-20">
+      <div className="flex items-start gap-3 mb-3">
         <CompanyMark name={job.company || "?"} />
         <div className="flex-1 min-w-0">
           <h3 className="text-base font-bold tracking-tight text-stone-900 dark:text-stone-50 line-clamp-1 leading-tight">

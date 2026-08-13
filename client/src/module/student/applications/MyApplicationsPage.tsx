@@ -474,11 +474,19 @@ export default function MyApplicationsPage() {
       {showExtensionSetup && (
         <div className="mb-6 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <Kicker>autofill / extension</Kicker>
-              <p className="mt-2 text-sm text-stone-600 dark:text-stone-300 leading-relaxed max-w-xl">
-                Autofill applications on Greenhouse, Lever, Ashby, Workday, LinkedIn and Indeed with your InternHack profile.
-              </p>
+            <div className="flex items-start gap-3 min-w-0">
+              <img
+                src="/logo.png"
+                alt=""
+                className="w-9 h-9 rounded-md border border-stone-200 dark:border-white/10 object-contain shrink-0"
+              />
+              <div className="min-w-0">
+                <Kicker>autofill / extension</Kicker>
+                <p className="mt-2 text-sm text-stone-600 dark:text-stone-300 leading-relaxed max-w-xl">
+                  Autofill applications on Greenhouse, Lever, Ashby, Workday, LinkedIn, Indeed and Wellfound with your
+                  InternHack profile. See how well your resume matches each job, and generate a cover letter with AI.
+                </p>
+              </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Button
@@ -531,6 +539,18 @@ export default function MyApplicationsPage() {
                 <li>
                   Open the InternHack Autofill extension. It signs in automatically from
                   your InternHack session, no token needed.
+                </li>
+                <li>
+                  Optional: paste an{" "}
+                  <a
+                    href="https://openrouter.ai/keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-stone-700 dark:text-stone-300 underline underline-offset-2"
+                  >
+                    OpenRouter API key
+                  </a>{" "}
+                  in the extension popup to generate cover letters with AI. The key stays in your browser.
                 </li>
               </ol>
             </div>

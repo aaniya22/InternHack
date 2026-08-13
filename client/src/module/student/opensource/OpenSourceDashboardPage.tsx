@@ -24,6 +24,12 @@ import {
   Code2,
   CheckCircle2,
   CalendarDays,
+  Bitcoin,
+  Sprout,
+  Landmark,
+  Globe2,
+  Palette,
+  Chrome,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "../../../components/ui/button";
@@ -62,6 +68,12 @@ const PROGRAM_LINKS: ProgramLink[] = [
   { href: "/student/opensource/lfx-projects", icon: Layers, label: "lfx", title: "LFX Mentorship", desc: "Linux Foundation mentorship projects." },
   { href: "/student/opensource/season-of-docs", icon: FileText, label: "docs", title: "Season of Docs", desc: "Technical writing with open source orgs." },
   { href: "/student/opensource/mlh", icon: Code2, label: "mlh", title: "MLH Fellowship", desc: "12-week remote engineering fellowship." },
+  { href: "/student/opensource/summer-of-bitcoin", icon: Bitcoin, label: "bitcoin", title: "Summer of Bitcoin", desc: "Paid summer internship in Bitcoin FOSS." },
+  { href: "/student/opensource/gssoc", icon: Sprout, label: "gssoc", title: "GirlScript Summer of Code", desc: "India's beginner-friendly points-based program." },
+  { href: "/student/opensource/c4gt", icon: Landmark, label: "c4gt", title: "Code for GovTech", desc: "Digital public goods used at population scale." },
+  { href: "/student/opensource/ospp", icon: Globe2, label: "ospp", title: "Open Source Promotion Plan", desc: "Funded summer tasks, open to students worldwide." },
+  { href: "/student/opensource/season-of-kde", icon: Palette, label: "kde", title: "Season of KDE", desc: "Winter mentorship on KDE apps and Plasma." },
+  { href: "/student/opensource/igalia", icon: Chrome, label: "igalia", title: "Igalia Coding Experience", desc: "Paid grant on browsers, graphics, and runtimes." },
 ];
 
 // Shorten "First Contributor (Beginner)" into name + level for the path switcher.
@@ -222,6 +234,32 @@ export default function OpenSourceDashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* ── Open source visualization ──────────────────── */}
+        <section aria-label="Open source visualization" className="space-y-3">
+          <SectionLabel>open source visualization</SectionLabel>
+
+          <Link
+            to="/student/opensource/analytics"
+            className="group flex items-center gap-3 p-4 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md no-underline hover:bg-stone-900 dark:hover:bg-stone-800 transition-colors"
+          >
+            <div className="w-9 h-9 rounded-md bg-stone-100 dark:bg-white/5 group-hover:bg-white/10 dark:group-hover:bg-lime-400/10 flex items-center justify-center shrink-0">
+              <BarChart3 className="w-4 h-4 text-stone-700 dark:text-stone-300 group-hover:text-lime-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <div className="h-1 w-1 bg-lime-400" />
+                <p className="text-[10px] font-mono uppercase tracking-widest text-stone-500 dark:text-stone-400 group-hover:text-lime-400">
+                  analytics
+                </p>
+              </div>
+              <p className="text-sm font-bold text-stone-900 dark:text-stone-50 group-hover:text-stone-50 dark:group-hover:text-white">
+                Chart every GSoC organization by category, tech stack, and year, then drill into one
+              </p>
+            </div>
+            <ArrowRight className="w-4 h-4 text-stone-400 dark:text-stone-500 group-hover:text-lime-400 group-hover:translate-x-0.5 transition-all shrink-0" />
+          </Link>
+        </section>
 
         {/* ── Continue learning ──────────────────────────── */}
         <section aria-label="Continue learning" className="space-y-3">
@@ -499,31 +537,6 @@ export default function OpenSourceDashboardPage() {
           </div>
         </section>
 
-        {/* ── Your activity ──────────────────────────────── */}
-        <section aria-label="Your activity" className="space-y-3">
-          <SectionLabel>your activity</SectionLabel>
-
-          <Link
-            to="/student/opensource/analytics"
-            className="group flex items-center gap-3 p-4 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md no-underline hover:bg-stone-900 dark:hover:bg-stone-800 transition-colors"
-          >
-            <div className="w-9 h-9 rounded-md bg-stone-100 dark:bg-white/5 group-hover:bg-white/10 dark:group-hover:bg-lime-400/10 flex items-center justify-center shrink-0">
-              <BarChart3 className="w-4 h-4 text-stone-700 dark:text-stone-300 group-hover:text-lime-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <div className="h-1 w-1 bg-lime-400" />
-                <p className="text-[10px] font-mono uppercase tracking-widest text-stone-500 dark:text-stone-400 group-hover:text-lime-400">
-                  analytics
-                </p>
-              </div>
-              <p className="text-sm font-bold text-stone-900 dark:text-stone-50 group-hover:text-stone-50 dark:group-hover:text-white">
-                Contribution trends, heatmap, and Hacktoberfest progress
-              </p>
-            </div>
-            <ArrowRight className="w-4 h-4 text-stone-400 dark:text-stone-500 group-hover:text-lime-400 group-hover:translate-x-0.5 transition-all shrink-0" />
-          </Link>
-        </section>
       </div>
 
       <SuggestRepoModal open={showSuggestModal} onClose={() => setShowSuggestModal(false)} />

@@ -1,19 +1,8 @@
 # InternHack
 
 **Prepare. Practice. Placed.**
+Live at **[internhack.xyz](https://www.internhack.xyz)**
 
-- [About InternHack](#about-internhack)
-- [Tech Stack](#tech-stack)
-- [Features](#features)
-- [Getting Started](#getting-started)
-- [Environment Variables](#environment-variables)
-- [Project Structure](#project-structure)
-- [API Overview](#api-overview)
-- [Production Build](#production-build)
-- [Contributing](#contributing)
-- [Contributors](#contributors)
-- [Project Support](#project-support)
-- [License](#license)
 
 ## About InternHack
 - AI-powered career and hiring platform
@@ -24,7 +13,6 @@
 - Includes dedicated dashboards for students and admins
 - Built to make placement preparation more accessible, efficient, and data-driven
 
-Live at **[internhack.xyz](https://www.internhack.xyz)**
 
 ---
 

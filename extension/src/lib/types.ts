@@ -1,4 +1,12 @@
-export type SiteType = "LINKEDIN" | "WORKDAY" | "GREENHOUSE" | "LEVER" | "ASHBY" | "INDEED" | "GENERIC";
+export type SiteType =
+  | "LINKEDIN"
+  | "WORKDAY"
+  | "GREENHOUSE"
+  | "LEVER"
+  | "ASHBY"
+  | "INDEED"
+  | "WELLFOUND"
+  | "GENERIC";
 
 export interface ExtensionProfile {
   user: {
@@ -52,7 +60,33 @@ export interface NormalizedProfile {
   skills: string;
   resumeUrl: string;
   bio: string;
+  coverLetter: string;
   customFields: Record<string, string>;
+}
+
+export interface ResumeMatch {
+  /** Percentage of the job's keywords the profile can evidence. */
+  score: number;
+  total: number;
+  matched: string[];
+  missing: string[];
+}
+
+/**
+ * Time saved is derived locally from what the extension has actually done, so
+ * the number is available offline and does not need a stats endpoint.
+ */
+export interface UsageStats {
+  autofills: number;
+  fieldsFilled: number;
+  coverLetters: number;
+  applicationsTracked: number;
+  secondsSaved: number;
+}
+
+export interface ExtensionSettings {
+  openRouterApiKey: string;
+  openRouterModel: string;
 }
 
 export type FieldKind =
@@ -71,6 +105,7 @@ export type FieldKind =
   | "skills"
   | "resumeUrl"
   | "bio"
+  | "coverLetter"
   | "customQuestion"
   | "unknown";
 

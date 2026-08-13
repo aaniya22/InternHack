@@ -347,11 +347,25 @@ export class DsaController {
       const list = req.params.name as string;
       const studentId = req.user?.id;
       const { page, limit } = parsePagination(req, { defaultLimit: 50 });
+      
+      // Parse query parameters
+      const search = req.query.search as string | undefined;
+      const difficulty = req.query.difficulty as string | undefined;
+      const topic = req.query.topic as string | undefined;
+      const company = req.query.company as string | undefined;
+      const status = req.query.status as string | undefined;
+
+      // Pass them into the service
       const result = await this.dsaService.getListProblems(
         list,
         studentId,
         page,
         limit,
+        search,
+        difficulty,
+        topic,
+        company,
+        status
       );
       res.json(result);
     } catch (err) {

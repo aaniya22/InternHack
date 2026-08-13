@@ -5,6 +5,7 @@ import { GreenhouseAdapter } from "./greenhouse";
 import { IndeedAdapter } from "./indeed";
 import { LeverAdapter } from "./lever";
 import { LinkedInAdapter } from "./linkedin";
+import { WellfoundAdapter } from "./wellfound";
 import { WorkdayAdapter } from "./workday";
 
 export function getAdapter(): Adapter {
@@ -15,6 +16,7 @@ export function getAdapter(): Adapter {
     new LeverAdapter(),
     new AshbyAdapter(),
     new IndeedAdapter(),
+    new WellfoundAdapter(),
   ];
   return adapters.find((adapter) => adapter.detect()) ?? new GenericAdapter();
 }

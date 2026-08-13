@@ -22,8 +22,18 @@ import {
   Clock,
   Activity,
   Crown,
+  FolderPlus,
+  Pencil,
+  Trash2,
+  Star,
 } from "lucide-react";
-import { grants, GRANT_CATEGORIES, type Grant, type GrantCategory } from "./grantsData";
+import {
+  grants,
+  GRANT_CATEGORIES,
+  type Grant,
+  type GrantCategory,
+} from "./grantsData";
+import { useGrantCollections } from "./useGrantCollections";
 import { SEO } from "../../../components/SEO";
 import { canonicalUrl } from "../../../lib/seo.utils";
 import { GridBackground } from "../../../components/ui/GridBackground";
@@ -32,7 +42,6 @@ import { FilterChip } from "../../../components/ui/FilterChip";
 import { EditorialDropdown } from "../../../components/ui/EditorialDropdown";
 import { Navbar } from "../../../components/Navbar";
 import { useAuthStore } from "../../../lib/auth.store";
-
 
 function resolveGrantLogo(logo: string, website: string): string {
   if (logo && !logo.includes("placehold.co")) return logo;
@@ -45,9 +54,21 @@ function resolveGrantLogo(logo: string, website: string): string {
 }
 
 const STATUS_CONFIG = {
-  Active:        { icon: CheckCircle2, color: "text-lime-600 dark:text-lime-400",     border: "border-lime-300 dark:border-lime-900/60" },
-  Paused:        { icon: AlertCircle,  color: "text-amber-600 dark:text-amber-400",   border: "border-amber-300 dark:border-amber-900/60" },
-  "Invite Only": { icon: Lock,         color: "text-stone-600 dark:text-stone-300", border: "border-stone-300 dark:border-stone-700" },
+  Active: {
+    icon: CheckCircle2,
+    color: "text-lime-600 dark:text-lime-400",
+    border: "border-lime-300 dark:border-lime-900/60",
+  },
+  Paused: {
+    icon: AlertCircle,
+    color: "text-amber-600 dark:text-amber-400",
+    border: "border-amber-300 dark:border-amber-900/60",
+  },
+  "Invite Only": {
+    icon: Lock,
+    color: "text-stone-600 dark:text-stone-300",
+    border: "border-stone-300 dark:border-stone-700",
+  },
 };
 
 const ECOSYSTEMS = Array.from(new Set(grants.map((g) => g.ecosystem))).sort();
@@ -62,7 +83,11 @@ function getDeadlineCountdown(deadline?: string | null) {
 
   const now = new Date();
   const utcToday = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  const utcDeadline = Date.UTC(deadlineDate.getFullYear(), deadlineDate.getMonth(), deadlineDate.getDate());
+  const utcDeadline = Date.UTC(
+    deadlineDate.getFullYear(),
+    deadlineDate.getMonth(),
+    deadlineDate.getDate(),
+  );
   const daysRemaining = Math.floor((utcDeadline - utcToday) / 86400000);
 
   if (daysRemaining < 0) return "Expired";
@@ -75,16 +100,12 @@ function getDeadlineBadge(deadline: string) {
   const now = new Date();
   const endDate = new Date(deadline);
 
-  const utcNow = Date.UTC(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate()
-  );
+  const utcNow = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
 
   const utcDeadline = Date.UTC(
     endDate.getFullYear(),
     endDate.getMonth(),
-    endDate.getDate()
+    endDate.getDate(),
   );
 
   const diffTime = utcDeadline - utcNow;
@@ -103,8 +124,7 @@ function getDeadlineBadge(deadline: string) {
   if (daysLeft < 7) {
     return {
       text: `${daysLeft} days left — Closing soon`,
-      className:
-        "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300",
+      className: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300",
       isClosed: false,
     };
   }
@@ -126,9 +146,19 @@ function getDeadlineBadge(deadline: string) {
   };
 }
 
-function MetaChip({ icon, children, className = "" }: { icon?: React.ReactNode; children: React.ReactNode; className?: string }) {
+function MetaChip({
+  icon,
+  children,
+  className = "",
+}: {
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider border rounded-md ${className || "text-stone-600 dark:text-stone-400 border-stone-200 dark:border-white/10"}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider border rounded-md ${className || "text-stone-600 dark:text-stone-400 border-stone-200 dark:border-white/10"}`}
+    >
       {icon && <span className="text-stone-400">{icon}</span>}
       {children}
     </span>
@@ -152,40 +182,53 @@ export default function GrantsPage() {
     new Date(user.subscriptionEndDate) > new Date();
 
   const [search, setSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<GrantCategory | "ALL">("ALL");
+  const [selectedCategory, setSelectedCategory] = useState<
+    GrantCategory | "ALL"
+  >("ALL");
   const [selectedEcosystem, setSelectedEcosystem] = useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [selectedGrant, setSelectedGrant] = useState<Grant | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showTracker, setShowTracker] = useState(false);
-  const [savedGrants, setSavedGrants] = useState<Set<number>>(() => {
-    try {
-      const stored = localStorage.getItem("savedGrants");
-      return stored ? new Set(JSON.parse(stored)) : new Set();
-    } catch {
-      return new Set();
-    }
-  });
+  const {
+    collections,
+    itemsByCollection,
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    toggleFavorite,
+    toggleItemInCollection,
+    searchCollections,
+    DEFAULT_COLLECTION_ID,
+  } = useGrantCollections();
+  const [activeCollectionId, setActiveCollectionId] = useState<string>(DEFAULT_COLLECTION_ID);
   const [showSavedOnly, setShowSavedOnly] = useState(false);
+  const [showCollectionsMenu, setShowCollectionsMenu] = useState(false);
+  const [collectionSearch, setCollectionSearch] = useState("");
 
-  const toggleSave = useCallback((grantId: number) => {
-    setSavedGrants((prev) => {
-      const next = new Set(prev);
-      if (next.has(grantId)) next.delete(grantId);
-      else next.add(grantId);
-      localStorage.setItem("savedGrants", JSON.stringify([...next]));
-      return next;
-    });
-  }, []);
+  const savedGrants = useMemo(
+    () => new Set(itemsByCollection[activeCollectionId] ?? []),
+    [itemsByCollection, activeCollectionId],
+  );
+
+  const toggleSave = useCallback(
+    (grantId: number) => toggleItemInCollection(grantId, activeCollectionId),
+    [toggleItemInCollection, activeCollectionId],
+  );
 
   // Stable callbacks passed into memo'd GrantCard — never recreated between renders
-  const handleCardSelect = useCallback((grant: Grant) => setSelectedGrant(grant), []);
+  const handleCardSelect = useCallback(
+    (grant: Grant) => setSelectedGrant(grant),
+    [],
+  );
   const handleCloseModal = useCallback(() => setSelectedGrant(null), []);
 
   const filtered = useMemo(() => {
     let result = grants.filter((g) => {
-      if (selectedCategory !== "ALL" && g.category !== selectedCategory) return false;
-      if (selectedEcosystem !== "ALL" && g.ecosystem !== selectedEcosystem) return false;
+      if (selectedCategory !== "ALL" && g.category !== selectedCategory)
+        return false;
+      if (selectedEcosystem !== "ALL" && g.ecosystem !== selectedEcosystem)
+        return false;
       if (selectedStatus !== "ALL" && g.status !== selectedStatus) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -202,19 +245,28 @@ export default function GrantsPage() {
     if (selectedCategory === "ALL" && !search) {
       const catOrder = new Map(GRANT_CATEGORIES.map((c, i) => [c, i]));
       result = [...result].sort(
-        (a, b) => (catOrder.get(a.category) ?? 99) - (catOrder.get(b.category) ?? 99),
+        (a, b) =>
+          (catOrder.get(a.category) ?? 99) - (catOrder.get(b.category) ?? 99),
       );
     }
     return result;
-  }, [search, selectedCategory, selectedEcosystem, selectedStatus, showSavedOnly, savedGrants]);
+  }, [
+    search,
+    selectedCategory,
+    selectedEcosystem,
+    selectedStatus,
+    showSavedOnly,
+    savedGrants,
+  ]);
 
-  const visibleGrants = isPremium ? filtered : filtered.slice(0, FREE_GRANT_LIMIT);
+  const visibleGrants = isPremium
+    ? filtered
+    : filtered.slice(0, FREE_GRANT_LIMIT);
   const lockedGrants = isPremium ? [] : filtered.slice(FREE_GRANT_LIMIT);
   const noop = useCallback(() => {}, []);
 
   const activeFilters =
-    (selectedEcosystem !== "ALL" ? 1 : 0) +
-    (selectedStatus !== "ALL" ? 1 : 0);
+    (selectedEcosystem !== "ALL" ? 1 : 0) + (selectedStatus !== "ALL" ? 1 : 0);
 
   const clearFilters = () => {
     setSelectedCategory("ALL");
@@ -236,7 +288,9 @@ export default function GrantsPage() {
 
       <GridBackground />
 
-      <div className={`relative max-w-6xl mx-auto ${isPublicRoute ? "pt-24" : ""}`}>
+      <div
+        className={`relative max-w-6xl mx-auto ${isPublicRoute ? "pt-24" : ""}`}
+      >
         {/* Editorial header */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -263,7 +317,8 @@ export default function GrantsPage() {
               </span>
             </h1>
             <p className="mt-3 text-sm text-stone-500 max-w-md">
-              Non-dilutive grants, government schemes, and accelerator programs for founders, across deep tech, climate, Web3, and more.
+              Non-dilutive grants, government schemes, and accelerator programs
+              for founders, across deep tech, climate, Web3, and more.
             </p>
           </div>
           <div className="flex items-center gap-4 text-[10px] font-mono uppercase tracking-widest text-stone-500">
@@ -351,7 +406,11 @@ export default function GrantsPage() {
                     active={active}
                     onClick={() =>
                       setSelectedCategory(
-                        cat === "ALL" ? "ALL" : cat === selectedCategory ? "ALL" : cat,
+                        cat === "ALL"
+                          ? "ALL"
+                          : cat === selectedCategory
+                            ? "ALL"
+                            : cat,
                       )
                     }
                   />
@@ -375,23 +434,135 @@ export default function GrantsPage() {
                   {activeFilters}
                 </span>
               )}
-              <ChevronDown className={`w-3 h-3 transition-transform ${showFilters ? "rotate-180" : ""}`} />
+              <ChevronDown
+                className={`w-3 h-3 transition-transform ${showFilters ? "rotate-180" : ""}`}
+              />
             </button>
 
-            <button
-              onClick={() => setShowSavedOnly(!showSavedOnly)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono uppercase tracking-widest border transition-colors cursor-pointer ${
-                showSavedOnly
-                  ? "bg-stone-900 dark:bg-stone-50 text-stone-50 dark:text-stone-900 border-stone-900 dark:border-stone-50"
-                  : "bg-transparent text-stone-600 dark:text-stone-400 border-stone-300 dark:border-white/10 hover:border-stone-500 dark:hover:border-white/30"
-              }`}
-            >
-              <Bookmark className="w-3 h-3" />
-              saved ({savedGrants.size})
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowSavedOnly(!showSavedOnly)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono uppercase tracking-widest border transition-colors cursor-pointer ${
+                  showSavedOnly
+                    ? "bg-stone-900 dark:bg-stone-50 text-stone-50 dark:text-stone-900 border-stone-900 dark:border-stone-50"
+                    : "bg-transparent text-stone-600 dark:text-stone-400 border-stone-300 dark:border-white/10 hover:border-stone-500 dark:hover:border-white/30"
+                }`}
+              >
+                <Bookmark className="w-3 h-3" />
+                {collections.find((c) => c.id === activeCollectionId)?.name ?? "saved"} ({savedGrants.size})
+              </button>
+              <button
+                onClick={() => setShowCollectionsMenu((v) => !v)}
+                title="Manage collections"
+                className="ml-1.5 inline-flex items-center px-2 py-1.5 rounded-md text-xs font-mono uppercase tracking-widest border border-stone-300 dark:border-white/10 text-stone-500 hover:border-stone-500 dark:hover:border-white/30 transition-colors cursor-pointer"
+              >
+                <ChevronDown className={`w-3 h-3 transition-transform ${showCollectionsMenu ? "rotate-180" : ""}`} />
+              </button>
+
+              <AnimatePresence>
+                {showCollectionsMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute z-20 mt-2 w-72 bg-white dark:bg-stone-900 border border-stone-200 dark:border-white/10 rounded-md shadow-xl p-3"
+                  >
+                    <div className="relative mb-2">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-stone-400" />
+                      <input
+                        type="text"
+                        value={collectionSearch}
+                        onChange={(e) => setCollectionSearch(e.target.value)}
+                        placeholder="Search collections..."
+                        className="w-full pl-7 pr-2 py-1.5 bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-white/10 rounded-md text-xs text-stone-900 dark:text-stone-50 placeholder-stone-400 focus:outline-none focus:border-lime-400"
+                      />
+                    </div>
+
+                    <div className="max-h-56 overflow-y-auto space-y-1">
+                      {searchCollections(collectionSearch)
+                        .slice()
+                        .sort((a, b) => Number(b.favorite) - Number(a.favorite))
+                        .map((col) => (
+                          <div
+                            key={col.id}
+                            className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs cursor-pointer ${
+                              col.id === activeCollectionId
+                                ? "bg-stone-100 dark:bg-stone-800"
+                                : "hover:bg-stone-50 dark:hover:bg-stone-800/50"
+                            }`}
+                            onClick={() => {
+                              setActiveCollectionId(col.id);
+                              setShowSavedOnly(true);
+                              setShowCollectionsMenu(false);
+                            }}
+                          >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleFavorite(col.id);
+                              }}
+                              className="shrink-0"
+                            >
+                              <Star
+                                className={`w-3 h-3 ${col.favorite ? "text-lime-500 fill-lime-500" : "text-stone-300"}`}
+                              />
+                            </button>
+                            <span className="flex-1 truncate text-stone-700 dark:text-stone-300">
+                              {col.name}
+                            </span>
+                            <span className="text-stone-400 tabular-nums shrink-0">
+                              {itemsByCollection[col.id]?.length ?? 0}
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const name = prompt("Rename collection", col.name);
+                                if (name) renameCollection(col.id, name);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 shrink-0 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            {col.id !== DEFAULT_COLLECTION_ID && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (confirm(`Delete "${col.name}"?`)) {
+                                    deleteCollection(col.id);
+                                    if (activeCollectionId === col.id) {
+                                      setActiveCollectionId(DEFAULT_COLLECTION_ID);
+                                    }
+                                  }
+                                }}
+                                className="opacity-0 group-hover:opacity-100 shrink-0 text-stone-400 hover:text-red-500"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        const name = prompt("New collection name");
+                        if (name) createCollection(name);
+                      }}
+                      className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-mono uppercase tracking-widest text-stone-600 dark:text-stone-400 border border-dashed border-stone-300 dark:border-white/10 hover:border-lime-400 hover:text-lime-600 transition-colors cursor-pointer"
+                    >
+                      <FolderPlus className="w-3 h-3" /> new collection
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             <AnimatePresence>
-              {(activeFilters > 0 || search || selectedCategory !== "ALL" || showSavedOnly) && (
+              {(activeFilters > 0 ||
+                search ||
+                selectedCategory !== "ALL" ||
+                showSavedOnly) && (
                 <motion.button
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -465,7 +636,9 @@ export default function GrantsPage() {
         {/* Results */}
         {filtered.length === 0 ? (
           <div className="py-20 text-center border border-dashed border-stone-300 dark:border-white/10 rounded-md">
-            <p className="text-sm text-stone-600 dark:text-stone-400">No grants match your filters.</p>
+            <p className="text-sm text-stone-600 dark:text-stone-400">
+              No grants match your filters.
+            </p>
             <p className="text-[10px] font-mono uppercase tracking-widest text-stone-500 mt-2">
               try different search criteria
             </p>
@@ -494,16 +667,18 @@ export default function GrantsPage() {
             {lockedGrants.length > 0 && (
               <div className="relative mt-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 blur-sm opacity-60 select-none pointer-events-none">
-                  {lockedGrants.slice(0, TEASER_PREVIEW_COUNT).map((grant, i) => (
-                    <GrantCard
-                      key={grant.id}
-                      grant={grant}
-                      index={i}
-                      onSelect={noop}
-                      saved={false}
-                      onToggleSave={noop}
-                    />
-                  ))}
+                  {lockedGrants
+                    .slice(0, TEASER_PREVIEW_COUNT)
+                    .map((grant, i) => (
+                      <GrantCard
+                        key={grant.id}
+                        grant={grant}
+                        index={i}
+                        onSelect={noop}
+                        saved={false}
+                        onToggleSave={noop}
+                      />
+                    ))}
                 </div>
                 <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-transparent via-stone-50/80 to-stone-50 dark:via-stone-950/80 dark:to-stone-950">
                   <Link
@@ -513,7 +688,8 @@ export default function GrantsPage() {
                     <Crown className="w-5 h-5 text-lime-600 dark:text-lime-400 shrink-0" />
                     <div>
                       <p className="text-sm font-bold text-stone-900 dark:text-stone-50">
-                        Unlock {lockedGrants.length} more grant{lockedGrants.length === 1 ? "" : "s"}
+                        Unlock {lockedGrants.length} more grant
+                        {lockedGrants.length === 1 ? "" : "s"}
                       </p>
                       <p className="text-xs text-stone-500">
                         Upgrade to Premium to see the full catalog
@@ -570,8 +746,8 @@ const GrantCard = memo(function GrantCard({
       <div
         onClick={() => onSelect(grant)}
         className={`group relative flex flex-col bg-white dark:bg-stone-900 p-5 rounded-md border border-stone-200 dark:border-white/10 hover:border-stone-400 dark:hover:border-white/30 transition-colors h-full cursor-pointer ${
-  deadlineBadge.isClosed ? "opacity-60" : ""
-}`}
+          deadlineBadge.isClosed ? "opacity-60" : ""
+        }`}
       >
         <span
           role="button"
@@ -598,7 +774,8 @@ const GrantCard = memo(function GrantCard({
                 const img = e.target as HTMLImageElement;
                 img.style.display = "none";
                 const span = document.createElement("span");
-                span.className = "text-sm font-bold text-stone-600 dark:text-stone-300";
+                span.className =
+                  "text-sm font-bold text-stone-600 dark:text-stone-300";
                 span.textContent = grant.organization.charAt(0);
                 img.parentElement?.appendChild(span);
               }}
@@ -633,11 +810,17 @@ const GrantCard = memo(function GrantCard({
               {countdown}
             </MetaChip>
           )}
-          <MetaChip icon={<DollarSign className="w-3 h-3" />}>{grant.fundingAmount}</MetaChip>
-          <MetaChip icon={<Globe className="w-3 h-3" />}>{grant.ecosystem}</MetaChip>
-          <MetaChip icon={<Tag className="w-3 h-3" />}>{grant.category}</MetaChip>
+          <MetaChip icon={<DollarSign className="w-3 h-3" />}>
+            {grant.fundingAmount}
+          </MetaChip>
+          <MetaChip icon={<Globe className="w-3 h-3" />}>
+            {grant.ecosystem}
+          </MetaChip>
+          <MetaChip icon={<Tag className="w-3 h-3" />}>
+            {grant.category}
+          </MetaChip>
           <span
-  className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider ${deadlineBadge.className}`}
+            className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider ${deadlineBadge.className}`}
           >
             {deadlineBadge.text}
           </span>
@@ -654,7 +837,13 @@ const GrantCard = memo(function GrantCard({
   );
 });
 
-function GrantDetailModal({ grant, onClose }: { grant: Grant; onClose: () => void }) {
+function GrantDetailModal({
+  grant,
+  onClose,
+}: {
+  grant: Grant;
+  onClose: () => void;
+}) {
   const statusCfg = STATUS_CONFIG[grant.status];
   const StatusIcon = statusCfg.icon;
   const logoSrc = resolveGrantLogo(grant.logo, grant.website);
@@ -687,7 +876,8 @@ function GrantDetailModal({ grant, onClose }: { grant: Grant; onClose: () => voi
                   const img = e.target as HTMLImageElement;
                   img.style.display = "none";
                   const span = document.createElement("span");
-                  span.className = "text-sm font-bold text-stone-600 dark:text-stone-300";
+                  span.className =
+                    "text-sm font-bold text-stone-600 dark:text-stone-300";
                   span.textContent = grant.organization.charAt(0);
                   img.parentElement?.appendChild(span);
                 }}
@@ -718,14 +908,20 @@ function GrantDetailModal({ grant, onClose }: { grant: Grant; onClose: () => voi
             >
               {grant.status}
             </MetaChip>
-            <MetaChip icon={<DollarSign className="w-3 h-3" />}>{grant.fundingAmount}</MetaChip>
-            <MetaChip icon={<Globe className="w-3 h-3" />}>{grant.ecosystem}</MetaChip>
-            <MetaChip icon={<Tag className="w-3 h-3" />}>{grant.category}</MetaChip>
+            <MetaChip icon={<DollarSign className="w-3 h-3" />}>
+              {grant.fundingAmount}
+            </MetaChip>
+            <MetaChip icon={<Globe className="w-3 h-3" />}>
+              {grant.ecosystem}
+            </MetaChip>
+            <MetaChip icon={<Tag className="w-3 h-3" />}>
+              {grant.category}
+            </MetaChip>
             <span
-            className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-mono tracking-wider ${deadlineBadge.className}`}
-          >
-            {deadlineBadge.text}
-          </span>
+              className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-mono tracking-wider ${deadlineBadge.className}`}
+            >
+              {deadlineBadge.text}
+            </span>
           </div>
 
           <div>
@@ -743,7 +939,10 @@ function GrantDetailModal({ grant, onClose }: { grant: Grant; onClose: () => voi
             </div>
             <div className="space-y-2">
               {grant.highlights.map((h, i) => (
-                <div key={i} className="flex items-start gap-2.5 text-sm text-stone-600 dark:text-stone-400">
+                <div
+                  key={i}
+                  className="flex items-start gap-2.5 text-sm text-stone-600 dark:text-stone-400"
+                >
                   <CheckCircle2 className="w-4 h-4 text-lime-500 mt-0.5 shrink-0" />
                   {h}
                 </div>
@@ -757,7 +956,10 @@ function GrantDetailModal({ grant, onClose }: { grant: Grant; onClose: () => voi
             </div>
             <div className="space-y-2">
               {grant.eligibility.map((e, i) => (
-                <div key={i} className="flex items-start gap-2.5 text-sm text-stone-600 dark:text-stone-400">
+                <div
+                  key={i}
+                  className="flex items-start gap-2.5 text-sm text-stone-600 dark:text-stone-400"
+                >
                   <span className="w-1 h-1 bg-lime-400 mt-2 shrink-0" />
                   {e}
                 </div>

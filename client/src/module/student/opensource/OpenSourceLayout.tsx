@@ -19,6 +19,12 @@ const SEGMENT_NAMES: Record<string, string> = {
   "lfx-projects": "LFX Projects",
   mlh: "MLH Fellowship",
   "season-of-docs": "Season of Docs",
+  "summer-of-bitcoin": "Summer of Bitcoin",
+  gssoc: "GirlScript Summer of Code",
+  c4gt: "Code for GovTech",
+  ospp: "Open Source Promotion Plan",
+  "season-of-kde": "Season of KDE",
+  igalia: "Igalia Coding Experience",
   analytics: "Analytics",
 };
 

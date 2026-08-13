@@ -3,8 +3,58 @@ import { invalidateRecommendations } from "../recommendation/recommendation.serv
 import { appCache } from "../../middleware/cache.middleware.js";
 import { Prisma } from "@prisma/client";
 import type { EnrollInput } from "./roadmap.validation.js";
+import { cacheGet, cacheSet } from "../../utils/cache.js";
+import type { PlanTier } from "../../config/usage-limits.js";
 
 const ROADMAP_STRUCTURE_TTL = 300; // 5 minutes
+const ROADMAP_LIST_TTL = 300; // 5 minutes
+
+export interface PublishedRoadmapsResponse {
+  roadmaps: {
+    id: number;
+    slug: string;
+    title: string;
+    shortDescription: string;
+    level: string;
+    estimatedHours: number;
+    coverImage: string | null;
+    ogImage: string | null;
+    topicCount: number;
+    enrolledCount: number;
+    tags: string[];
+    updatedAt: Date;
+    isAiGenerated: boolean;
+    ownerUserId: number | null;
+  }[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export type CommunityRoadmapsResponse = {
+  id: number;
+  slug: string;
+  title: string;
+  shortDescription: string;
+  level: string;
+  estimatedHours: number;
+  coverImage: string | null;
+  ogImage: string | null;
+  topicCount: number;
+  enrolledCount: number;
+  tags: string[];
+  updatedAt: Date;
+  isAiGenerated: boolean;
+  ownerUserId: number | null;
+  creatorName: string | null;
+}[];
+
+function stableKey(obj: Record<string, unknown>): string {
+  return JSON.stringify(Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b))));
+}
 
 interface WeeklyPlanWeek {
   week: number;
@@ -146,15 +196,22 @@ export function buildWeeklyPlan(
   return { plan, targetEndDate };
 }
 
-export async function listPublishedRoadmaps(opts: {
-  page: number;
-  limit: number;
-  level?: string | undefined;
-  search?: string | undefined;
-  tag?: string | undefined;
-  category?: string | undefined;
-  userId?: number | undefined;
-}) {
+export async function listPublishedRoadmaps(
+  opts: {
+    page: number;
+    limit: number;
+    level?: string | undefined;
+    search?: string | undefined;
+    tag?: string | undefined;
+    category?: string | undefined;
+    userId?: number | undefined;
+  },
+  tier: PlanTier = "FREE"
+): Promise<PublishedRoadmapsResponse> {
+  const cacheKey = `roadmaps:list:${tier}:${stableKey(opts as unknown as Record<string, unknown>)}`;
+  const cached = await cacheGet<PublishedRoadmapsResponse>(cacheKey);
+  if (cached) return cached;
+
   // Build the visibility condition: public roadmaps + caller's own unpublished ones
   const visibilityCondition: Prisma.roadmapWhereInput = opts.userId
     ? { OR: [{ isPublished: true }, { isPublished: false, ownerUserId: opts.userId }] }
@@ -220,7 +277,7 @@ export async function listPublishedRoadmaps(opts: {
     prisma.roadmap.count({ where }),
   ]);
 
-  return {
+  const result: PublishedRoadmapsResponse = {
     roadmaps,
     pagination: {
       page: opts.page,
@@ -229,9 +286,16 @@ export async function listPublishedRoadmaps(opts: {
       totalPages: Math.ceil(total / opts.limit),
     },
   };
+
+  await cacheSet(cacheKey, result, ROADMAP_LIST_TTL);
+  return result;
 }
 
-export async function listCommunityRoadmaps(limit = 24) {
+export async function listCommunityRoadmaps(limit = 24, tier: PlanTier = "FREE"): Promise<CommunityRoadmapsResponse> {
+  const cacheKey = `roadmaps:community:${tier}:${limit}`;
+  const cached = await cacheGet<CommunityRoadmapsResponse>(cacheKey);
+  if (cached) return cached;
+
   const rows = await prisma.roadmap.findMany({
     where: { isPubliclyShared: true, isAiGenerated: true },
     orderBy: { updatedAt: "desc" },
@@ -254,10 +318,14 @@ export async function listCommunityRoadmaps(limit = 24) {
       owner: { select: { name: true } },
     },
   });
-  return rows.map(({ owner, ...r }) => ({
+  
+  const result: CommunityRoadmapsResponse = rows.map(({ owner, ...r }) => ({
     ...r,
     creatorName: owner?.name ?? null,
   }));
+
+  await cacheSet(cacheKey, result, ROADMAP_LIST_TTL);
+  return result;
 }
 
 type RoadmapStructure = Prisma.roadmapGetPayload<{
@@ -1259,4 +1327,3 @@ export function summarizeProgress(
     hoursTotal,
   };
 }
-

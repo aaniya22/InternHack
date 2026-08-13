@@ -3,9 +3,21 @@
   "name": "InternHack Autofill",
   "description": "Autofill internship and job applications with your InternHack profile.",
   "version": "0.1.0",
+  "icons": {
+    "16": "logo.png",
+    "32": "logo.png",
+    "48": "logo.png",
+    "128": "logo.png"
+  },
   "action": {
     "default_title": "InternHack Autofill",
-    "default_popup": "src/popup/index.html"
+    "default_popup": "src/popup/index.html",
+    "default_icon": {
+      "16": "logo.png",
+      "32": "logo.png",
+      "48": "logo.png",
+      "128": "logo.png"
+    }
   },
   "background": {
     "service_worker": "assets/background.js",
@@ -17,12 +29,16 @@
     "https://api.internhack.xyz/*",
     "https://www.internhack.xyz/*",
     "https://internhack.xyz/*",
+    "https://openrouter.ai/*",
     "https://*.linkedin.com/*",
     "https://*.workdayjobs.com/*",
     "https://*.greenhouse.io/*",
     "https://jobs.lever.co/*",
     "https://*.ashbyhq.com/*",
-    "https://*.indeed.com/*"
+    "https://*.indeed.com/*",
+    "https://wellfound.com/*",
+    "https://*.wellfound.com/*",
+    "https://angel.co/*"
   ],
   "content_scripts": [
     {
@@ -32,7 +48,10 @@
         "https://*.greenhouse.io/*",
         "https://jobs.lever.co/*",
         "https://*.ashbyhq.com/*",
-        "https://*.indeed.com/*"
+        "https://*.indeed.com/*",
+        "https://wellfound.com/*",
+        "https://*.wellfound.com/*",
+        "https://angel.co/*"
       ],
       "js": ["assets/content.js"],
       "run_at": "document_idle"
@@ -46,6 +65,21 @@
       "js": ["assets/bridge.js"],
       "run_at": "document_idle"
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["logo.png"],
+      "matches": [
+        "https://*.linkedin.com/*",
+        "https://*.workdayjobs.com/*",
+        "https://*.greenhouse.io/*",
+        "https://jobs.lever.co/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.indeed.com/*",
+        "https://wellfound.com/*",
+        "https://*.wellfound.com/*",
+        "https://angel.co/*"
+      ]
+    }
   ]
 }
-

@@ -27,6 +27,30 @@ function highlight(element: HTMLElement) {
   }, 1400);
 }
 
+/**
+ * Writes a generated cover letter into the page's cover letter box. Unlike
+ * fillFields this overwrites what is already there: the user asked for this
+ * letter explicitly, so replacing a draft is the expected outcome.
+ */
+export function fillCoverLetterFields(fields: FieldMapping[], value: string) {
+  const targets = fields.filter(
+    (field) =>
+      field.kind === "coverLetter" ||
+      (field.kind === "customQuestion" && /cover\s*letter/i.test(field.label)),
+  );
+
+  let filledCount = 0;
+  for (const field of targets) {
+    if (field.element instanceof HTMLSelectElement) continue;
+    if (field.element.type === "file") continue;
+    setNativeValue(field.element, value);
+    highlight(field.element);
+    field.element.scrollIntoView({ behavior: "smooth", block: "center" });
+    filledCount += 1;
+  }
+  return { targetCount: targets.length, filledCount };
+}
+
 export function fillFields(profile: NormalizedProfile, fields: FieldMapping[]) {
   let filledCount = 0;
   const failed: FieldMapping[] = [];

@@ -105,11 +105,14 @@ export class JobMatchingService {
       },
     });
 
-    let matchCount = 0;
+    if (users.length === 0) return 0;
 
+    const allJobIds = new Set<number>();
+    const userMatches = new Map<number, Array<{ id: number; similarity: number }>>();
+
+    // 1. Gather all vector searches (must remain per-user due to the `<=>` distance operator)
     for (const pref of users) {
       try {
-        // Vector search: top 20 most similar new jobs
         const results = await prisma.$queryRawUnsafe<Array<{ id: number; similarity: number }>>(
           `SELECT ji.id, 1 - (ji.embedding <=> up.embedding) AS similarity
            FROM "jobIndex" ji, "userJobPreference" up
@@ -126,32 +129,119 @@ export class JobMatchingService {
           cutoff,
         );
 
-        if (results.length === 0) continue;
-
-        const jobIds = results.map((r) => r.id);
-        const jobs = await prisma.jobIndex.findMany({ where: { id: { in: jobIds } } });
-        const jobMap = new Map(jobs.map((j) => [j.id, j]));
-
-        const upserts = results.flatMap((row) => {
-          const job = jobMap.get(row.id);
-          if (!job) return [];
-          const scores = this.computeMatch(pref, job, row.similarity);
-          if (scores.score < 0.3 || pref.dismissedJobIds.includes(job.id)) return [];
-          return [
-            prisma.jobMatch.upsert({
-              where: { userId_jobIndexId: { userId: pref.userId, jobIndexId: job.id } },
-              create: { userId: pref.userId, jobIndexId: job.id, ...scores },
-              update: scores,
-            }),
-          ];
-        });
-
-        if (upserts.length > 0) {
-          await prisma.$transaction(upserts);
-          matchCount += upserts.length;
+        if (results.length > 0) {
+          userMatches.set(pref.userId, results);
+          for (const r of results) allJobIds.add(r.id);
         }
-      } catch {
-        // pgvector / embedding columns not set up yet, skip silently
+      } catch (err) {
+        // pgvector / embedding columns not set up yet — but also logs unexpected failures
+        console.error(`generateMatches: vector search failed for user ${pref.userId}`, err);
+      }
+    }
+
+    if (allJobIds.size === 0) return 0;
+
+    // 2. Batch the reads for jobs, chunked to respect Postgres parameter limits
+    const READ_CHUNK_SIZE = 1000;
+    const jobIdList = Array.from(allJobIds);
+    const jobMap = new Map<number, any>();
+    
+    for (let i = 0; i < jobIdList.length; i += READ_CHUNK_SIZE) {
+      const chunk = jobIdList.slice(i, i + READ_CHUNK_SIZE);
+      const jobs = await prisma.jobIndex.findMany({ where: { id: { in: chunk } } });
+      for (const j of jobs) jobMap.set(j.id, j);
+    }
+
+    // 3. Compute matches and candidate records in memory
+    const matchCandidates: Array<{
+      userId: number;
+      jobIndexId: number;
+      score: number;
+      skillMatch: number;
+      locationMatch: number;
+      salaryMatch: number;
+      vectorScore: number;
+    }> = [];
+
+    for (const pref of users) {
+      const results = userMatches.get(pref.userId) || [];
+      for (const row of results) {
+        const job = jobMap.get(row.id);
+        if (!job) continue;
+
+        const scores = this.computeMatch(pref, job, row.similarity);
+        if (scores.score < 0.3 || pref.dismissedJobIds.includes(job.id)) continue;
+
+        matchCandidates.push({
+          userId: pref.userId,
+          jobIndexId: job.id,
+          ...scores,
+        });
+      }
+    }
+
+    if (matchCandidates.length === 0) return 0;
+
+    // 4. Batch fetch existing records to compute diffs in memory (Chunked OR query)
+    const existingMatches = new Set<string>();
+    
+    for (let i = 0; i < matchCandidates.length; i += READ_CHUNK_SIZE) {
+      const chunk = matchCandidates.slice(i, i + READ_CHUNK_SIZE);
+      const existing = await prisma.jobMatch.findMany({
+        where: { OR: chunk.map((c) => ({ userId: c.userId, jobIndexId: c.jobIndexId })) },
+        select: { userId: true, jobIndexId: true },
+      });
+      for (const e of existing) {
+        existingMatches.add(`${e.userId}-${e.jobIndexId}`);
+      }
+    }
+
+    // 5. Separate candidates into Creates and Updates
+    const toCreate = [];
+    const toUpdate = [];
+
+    for (const c of matchCandidates) {
+      if (existingMatches.has(`${c.userId}-${c.jobIndexId}`)) {
+        toUpdate.push(c);
+      } else {
+        toCreate.push(c);
+      }
+    }
+
+    let matchCount = 0;
+
+    // 6. Apply writes efficiently
+    
+    // Bulk insert new records with skipDuplicates for race condition safety
+    if (toCreate.length > 0) {
+      const createResult = await prisma.jobMatch.createMany({
+        data: toCreate,
+        skipDuplicates: true,
+      });
+      matchCount += createResult.count;
+    }
+
+    // Apply updates in a single chunked transaction to prevent pool exhaustion
+    if (toUpdate.length > 0) {
+      const UPDATE_CHUNK_SIZE = 100;
+      for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK_SIZE) {
+        const chunk = toUpdate.slice(i, i + UPDATE_CHUNK_SIZE);
+        
+        const updatePromises = chunk.map((u) =>
+          prisma.jobMatch.updateMany({
+            where: { userId: u.userId, jobIndexId: u.jobIndexId },
+            data: {
+              score: u.score,
+              skillMatch: u.skillMatch,
+              locationMatch: u.locationMatch,
+              salaryMatch: u.salaryMatch,
+              vectorScore: u.vectorScore,
+            },
+          })
+        );
+        
+        const updateResults = await prisma.$transaction(updatePromises);
+        matchCount += updateResults.reduce((sum, result) => sum + result.count, 0);
       }
     }
 

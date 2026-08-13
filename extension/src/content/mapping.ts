@@ -1,6 +1,12 @@
 import type { FieldKind, FieldMapping } from "../lib/types";
 
 const FIELD_PATTERNS: Array<{ kind: FieldKind; patterns: RegExp[] }> = [
+  // First: a cover letter box often sits in a section whose wrapper text also
+  // mentions "resume", and the resume pattern would otherwise claim it.
+  {
+    kind: "coverLetter",
+    patterns: [/cover\s*letter/i, /why\s+do\s+you\s+want\s+to\s+work/i, /note\s+to\s+(the\s+)?hiring\s+manager/i],
+  },
   { kind: "firstName", patterns: [/first\s*name/i, /given\s*name/i] },
   { kind: "lastName", patterns: [/last\s*name/i, /family\s*name/i, /surname/i] },
   { kind: "fullName", patterns: [/full\s*name/i, /^name$/i, /legal\s*name/i] },
@@ -15,7 +21,7 @@ const FIELD_PATTERNS: Array<{ kind: FieldKind; patterns: RegExp[] }> = [
   { kind: "graduationYear", patterns: [/graduation\s*year/i, /grad\s*year/i, /expected\s*graduation/i] },
   { kind: "skills", patterns: [/skills/i, /technologies/i, /tech\s*stack/i] },
   { kind: "resumeUrl", patterns: [/resume/i, /cv/i] },
-  { kind: "bio", patterns: [/summary/i, /about/i, /cover\s*letter/i] },
+  { kind: "bio", patterns: [/summary/i, /about/i] },
 ];
 
 function textOf(node: Element | null): string {

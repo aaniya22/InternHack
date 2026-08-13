@@ -102,16 +102,35 @@ header h1 {
   color: #57534e;
 }
 
-textarea {
+textarea,
+input {
   margin-top: 8px;
   width: 100%;
-  min-height: 78px;
-  resize: vertical;
   border: 1px solid #d6d3d1;
   border-radius: 6px;
   padding: 8px;
   font: inherit;
   font-size: 12px;
+  background: #fff;
+  color: #1c1917;
+}
+
+textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: #a3e635;
+}
+
+.stat {
+  margin: 8px 0 2px;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 button {
